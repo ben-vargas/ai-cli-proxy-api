@@ -153,6 +153,9 @@ func (h *ClaudeCodeAPIHandler) handleNonStreamingResponse(c *gin.Context, rawJSO
 		cliCancel(errMsg.Error)
 		return
 	}
+	if decoded, err := handlers.DecodePossibleGzip(resp); err == nil {
+		resp = decoded
+	}
 	_, _ = c.Writer.Write(resp)
 	cliCancel()
 }

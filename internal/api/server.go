@@ -7,9 +7,12 @@ package api
 import (
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +39,55 @@ import (
 )
 
 const oauthCallbackSuccessHTML = `<html><head><meta charset="utf-8"><title>Authentication successful</title><script>setTimeout(function(){window.close();},5000);</script></head><body><h1>Authentication successful!</h1><p>You can close this window.</p><p>This window will close automatically in 5 seconds.</p></body></html>`
+
+func lookupAmpAPIKey(explicitKey string) string {
+	if key := strings.TrimSpace(explicitKey); key != "" {
+		return key
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	secretsPath := filepath.Join(home, ".local", "share", "amp", "secrets.json")
+	content, err := os.ReadFile(secretsPath)
+	if err != nil {
+		return ""
+	}
+	var secrets map[string]string
+	if err := json.Unmarshal(content, &secrets); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(secrets["apiKey@https://ampcode.com/"])
+}
+
+func newAmpUpstreamProxyHandler(upstreamURL, apiKey string) (gin.HandlerFunc, error) {
+	upstreamURL = strings.TrimSpace(upstreamURL)
+	if upstreamURL == "" {
+		return nil, nil
+	}
+	parsed, err := url.Parse(upstreamURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid amp upstream url: %w", err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(parsed)
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		req.Host = parsed.Host
+		if key := lookupAmpAPIKey(apiKey); key != "" {
+			req.Header.Set("X-Api-Key", key)
+			req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", key))
+		}
+	}
+	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, err error) {
+		log.Errorf("amp upstream proxy error: %v", err)
+		rw.WriteHeader(http.StatusBadGateway)
+		_, _ = rw.Write([]byte(`{"error":"amp_upstream_proxy_error"}`))
+	}
+	return func(c *gin.Context) {
+		proxy.ServeHTTP(c.Writer, c.Request)
+	}, nil
+}
 
 type serverOptionConfig struct {
 	extraMiddleware      []gin.HandlerFunc
@@ -271,6 +323,29 @@ func (s *Server) setupRoutes() {
 	claudeCodeHandlers := claude.NewClaudeCodeAPIHandler(s.handlers)
 	openaiResponsesHandlers := openai.NewOpenAIResponsesAPIHandler(s.handlers)
 
+	if handler, err := newAmpUpstreamProxyHandler(s.cfg.AmpUpstreamURL, s.cfg.AmpUpstreamAPIKey); err != nil {
+		log.Warnf("amp upstream proxy disabled: %v", err)
+	} else if handler != nil {
+		ampAPI := s.engine.Group("/api")
+		ampAPI.Any("/internal", handler)
+		ampAPI.Any("/internal/*path", handler)
+		ampAPI.Any("/user/*path", handler)
+		ampAPI.Any("/user", handler)
+		ampAPI.Any("/auth", handler)
+		ampAPI.Any("/auth/*path", handler)
+		ampAPI.Any("/meta", handler)
+		ampAPI.Any("/meta/*path", handler)
+		ampAPI.Any("/ads", handler)
+		ampAPI.Any("/telemetry", handler)
+		ampAPI.Any("/telemetry/*path", handler)
+		ampAPI.Any("/threads", handler)
+		ampAPI.Any("/threads/*path", handler)
+		ampAPI.Any("/otel", handler)
+		ampAPI.Any("/otel/*path", handler)
+		ampAPI.Any("/provider/google/v1beta1/*path", handler)
+		log.Infof("amp upstream proxy enabled for %s", s.cfg.AmpUpstreamURL)
+	}
+
 	// OpenAI compatible API routes
 	v1 := s.engine.Group("/v1")
 	v1.Use(AuthMiddleware(s.accessManager))
@@ -290,6 +365,55 @@ func (s *Server) setupRoutes() {
 		v1beta.GET("/models", geminiHandlers.GeminiModels)
 		v1beta.POST("/models/:action", geminiHandlers.GeminiHandler)
 		v1beta.GET("/models/:action", geminiHandlers.GeminiGetHandler)
+	}
+
+	// Amp CLI provider-style route aliases
+	ampProviders := s.engine.Group("/api/provider")
+	ampProviders.Use(AuthMiddleware(s.accessManager))
+	{
+		provider := ampProviders.Group("/:provider")
+
+		ampModelsHandler := func(c *gin.Context) {
+			providerName := strings.ToLower(c.Param("provider"))
+
+			switch providerName {
+			case "anthropic":
+				claudeCodeHandlers.ClaudeModels(c)
+			case "google":
+				geminiHandlers.GeminiModels(c)
+			default:
+				openaiHandlers.OpenAIModels(c)
+			}
+		}
+
+		// Root-level OpenAI-compatible aliases (providers like groq/cerebras omit /v1)
+		provider.GET("/models", ampModelsHandler)
+		provider.POST("/chat/completions", openaiHandlers.ChatCompletions)
+		provider.POST("/completions", openaiHandlers.Completions)
+		provider.POST("/responses", openaiResponsesHandlers.Responses)
+
+		// v1 endpoints (OpenAI/Claude-compatible)
+		v1Amp := provider.Group("/v1")
+		{
+			v1Amp.GET("/models", ampModelsHandler)
+
+			// OpenAI-compatible endpoints
+			v1Amp.POST("/chat/completions", openaiHandlers.ChatCompletions)
+			v1Amp.POST("/completions", openaiHandlers.Completions)
+			v1Amp.POST("/responses", openaiResponsesHandlers.Responses)
+
+			// Claude/Anthropic-compatible endpoints
+			v1Amp.POST("/messages", claudeCodeHandlers.ClaudeMessages)
+			v1Amp.POST("/messages/count_tokens", claudeCodeHandlers.ClaudeCountTokens)
+		}
+
+		// v1beta endpoints (Gemini native)
+		v1betaAmp := provider.Group("/v1beta")
+		{
+			v1betaAmp.GET("/models", geminiHandlers.GeminiModels)
+			v1betaAmp.POST("/models/:action", geminiHandlers.GeminiHandler)
+			v1betaAmp.GET("/models/:action", geminiHandlers.GeminiGetHandler)
+		}
 	}
 
 	// Root endpoint
@@ -358,6 +482,14 @@ func (s *Server) setupRoutes() {
 	})
 
 	// Management routes are registered lazily by registerManagementRoutes when a secret is configured.
+
+	s.engine.NoRoute(func(c *gin.Context) {
+		log.Warnf("unhandled route %s %s", c.Request.Method, c.Request.URL.Path)
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":   "Not Found",
+			"message": "The requested resource was not found",
+		})
+	})
 }
 
 func (s *Server) registerManagementRoutes() {

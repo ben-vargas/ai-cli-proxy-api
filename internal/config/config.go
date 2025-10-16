@@ -22,6 +22,12 @@ type Config struct {
 	// Port is the network port on which the API server will listen.
 	Port int `yaml:"port" json:"-"`
 
+	// AmpUpstreamURL defines the upstream Amp control plane used for non-provider calls.
+	AmpUpstreamURL string `yaml:"amp-upstream-url" json:"amp-upstream-url"`
+
+	// AmpUpstreamAPIKey optionally overrides the Authorization header when proxying Amp upstream calls.
+	AmpUpstreamAPIKey string `yaml:"amp-upstream-api-key" json:"amp-upstream-api-key"`
+
 	// AuthDir is the directory where authentication token files are stored.
 	AuthDir string `yaml:"auth-dir" json:"-"`
 

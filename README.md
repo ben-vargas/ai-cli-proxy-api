@@ -21,6 +21,7 @@ Chinese providers have now been added: [Qwen Code](https://github.com/QwenLM/qwe
 - Function calling/tools support
 - Multimodal input support (text and images)
 - Multiple accounts with round-robin load balancing (Gemini, OpenAI, Claude, Qwen and iFlow)
+- Amp CLI compatibility via `/api/provider/{provider}/v1...` route aliases
 - Simple CLI authentication flows (Gemini, OpenAI, Claude, Qwen and iFlow)
 - Generative Language API Key support
 - Gemini CLI multi-account load balancing
