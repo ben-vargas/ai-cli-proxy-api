@@ -123,17 +123,15 @@ func createReverseProxy(upstreamURL string, secretSource SecretSource) (*httputi
 	return proxy, nil
 }
 
-// isStreamingResponse detects if the response is streaming (SSE or chunked)
+// isStreamingResponse detects if the response is streaming (SSE only)
+// Note: We only treat text/event-stream as streaming. Chunked transfer encoding
+// is a transport-level detail and doesn't mean we can't decompress the full response.
+// Many JSON APIs use chunked encoding for normal responses.
 func isStreamingResponse(resp *http.Response) bool {
 	contentType := resp.Header.Get("Content-Type")
 
-	// Check for Server-Sent Events
+	// Only Server-Sent Events are true streaming responses
 	if strings.Contains(contentType, "text/event-stream") {
-		return true
-	}
-
-	// Check for chunked transfer encoding
-	if strings.Contains(strings.ToLower(resp.Header.Get("Transfer-Encoding")), "chunked") {
 		return true
 	}
 

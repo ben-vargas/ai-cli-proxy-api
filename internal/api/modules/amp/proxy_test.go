@@ -162,33 +162,40 @@ func TestModifyResponse_SkipsStreamingResponses(t *testing.T) {
 	goodJSON := []byte(`{"ok":true}`)
 	gzipped := gzipBytes(goodJSON)
 
-	cases := []struct {
-		name   string
-		header http.Header
-	}{
-		{
-			name:   "sse_content_type",
-			header: http.Header{"Content-Type": []string{"text/event-stream"}},
-		},
-		{
-			name:   "chunked_transfer_encoding",
-			header: http.Header{"Transfer-Encoding": []string{"chunked"}},
-		},
+	t.Run("sse_skips_decompression", func(t *testing.T) {
+		resp := mkResp(200, http.Header{"Content-Type": []string{"text/event-stream"}}, gzipped)
+		if err := proxy.ModifyResponse(resp); err != nil {
+			t.Fatalf("ModifyResponse error: %v", err)
+		}
+		// SSE should NOT be decompressed
+		got, _ := io.ReadAll(resp.Body)
+		if !bytes.Equal(got, gzipped) {
+			t.Fatal("SSE response should not be decompressed")
+		}
+	})
+}
+
+func TestModifyResponse_DecompressesChunkedJSON(t *testing.T) {
+	proxy, err := createReverseProxy("http://example.com", NewStaticSecretSource("k"))
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			resp := mkResp(200, tc.header, gzipped)
-			if err := proxy.ModifyResponse(resp); err != nil {
-				t.Fatalf("ModifyResponse error: %v", err)
-			}
-			// Should NOT decompress streaming responses
-			got, _ := io.ReadAll(resp.Body)
-			if !bytes.Equal(got, gzipped) {
-				t.Fatal("streaming response should not be decompressed")
-			}
-		})
-	}
+	goodJSON := []byte(`{"ok":true}`)
+	gzipped := gzipBytes(goodJSON)
+
+	t.Run("chunked_json_decompresses", func(t *testing.T) {
+		// Chunked JSON responses (like thread APIs) should be decompressed
+		resp := mkResp(200, http.Header{"Transfer-Encoding": []string{"chunked"}}, gzipped)
+		if err := proxy.ModifyResponse(resp); err != nil {
+			t.Fatalf("ModifyResponse error: %v", err)
+		}
+		// Should decompress because it's not SSE
+		got, _ := io.ReadAll(resp.Body)
+		if !bytes.Equal(got, goodJSON) {
+			t.Fatalf("chunked JSON should be decompressed, got: %q, want: %q", got, goodJSON)
+		}
+	})
 }
 
 func TestReverseProxy_InjectsHeaders(t *testing.T) {
@@ -365,9 +372,9 @@ func TestIsStreamingResponse(t *testing.T) {
 			want:   true,
 		},
 		{
-			name:   "chunked",
+			name:   "chunked_not_streaming",
 			header: http.Header{"Transfer-Encoding": []string{"chunked"}},
-			want:   true,
+			want:   false, // Chunked is transport-level, not streaming
 		},
 		{
 			name:   "normal_json",
