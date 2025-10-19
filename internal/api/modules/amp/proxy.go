@@ -15,6 +15,16 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// readCloser wraps a reader and forwards Close to a separate closer.
+// Used to restore peeked bytes while preserving upstream body Close behavior.
+type readCloser struct {
+	r io.Reader
+	c io.Closer
+}
+
+func (rc *readCloser) Read(p []byte) (int, error) { return rc.r.Read(p) }
+func (rc *readCloser) Close() error               { return rc.c.Close() }
+
 // createReverseProxy creates a reverse proxy handler for Amp upstream
 // with automatic gzip decompression via ModifyResponse
 func createReverseProxy(upstreamURL string, secretSource SecretSource) (*httputil.ReverseProxy, error) {
@@ -63,18 +73,24 @@ func createReverseProxy(upstreamURL string, secretSource SecretSource) (*httputi
 			return nil
 		}
 
+		// Save reference to original upstream body for proper cleanup
+		originalBody := resp.Body
+
 		// Peek at first 2 bytes to detect gzip magic bytes
 		header := make([]byte, 2)
-		n, _ := io.ReadFull(resp.Body, header)
+		n, _ := io.ReadFull(originalBody, header)
 		
 		// Check for gzip magic bytes (0x1f 0x8b)
 		// If n < 2, we didn't get enough bytes, so it's not gzip
 		if n >= 2 && header[0] == 0x1f && header[1] == 0x8b {
 			// It's gzip - read the rest of the body
-			rest, err := io.ReadAll(resp.Body)
+			rest, err := io.ReadAll(originalBody)
 			if err != nil {
-				// Restore what we read and return original body
-				resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(header[:n]), resp.Body))
+				// Restore what we read and return original body (preserve Close behavior)
+				resp.Body = &readCloser{
+					r: io.MultiReader(bytes.NewReader(header[:n]), originalBody),
+					c: originalBody,
+				}
 				return nil
 			}
 			
@@ -85,7 +101,8 @@ func createReverseProxy(upstreamURL string, secretSource SecretSource) (*httputi
 			gzipReader, err := gzip.NewReader(bytes.NewReader(gzippedData))
 			if err != nil {
 				log.Warnf("amp proxy: gzip header detected but decompress failed: %v", err)
-				// Return original gzipped body
+				// Close original body and return in-memory copy
+				_ = originalBody.Close()
 				resp.Body = io.NopCloser(bytes.NewReader(gzippedData))
 				return nil
 			}
@@ -94,10 +111,14 @@ func createReverseProxy(upstreamURL string, secretSource SecretSource) (*httputi
 			_ = gzipReader.Close()
 			if err != nil {
 				log.Warnf("amp proxy: gzip decompress error: %v", err)
-				// Return original gzipped body
+				// Close original body and return in-memory copy
+				_ = originalBody.Close()
 				resp.Body = io.NopCloser(bytes.NewReader(gzippedData))
 				return nil
 			}
+
+			// Close original body since we're replacing with in-memory decompressed content
+			_ = originalBody.Close()
 
 			// Replace body with decompressed content
 			resp.Body = io.NopCloser(bytes.NewReader(decompressed))
@@ -110,9 +131,12 @@ func createReverseProxy(upstreamURL string, secretSource SecretSource) (*httputi
 
 			log.Debugf("amp proxy: decompressed gzip response (%d -> %d bytes)", len(gzippedData), len(decompressed))
 		} else {
-			// Not gzip - restore original body with peeked bytes
+			// Not gzip - restore peeked bytes while preserving Close behavior
 			// Handle edge cases: n might be 0, 1, or 2 depending on EOF
-			resp.Body = io.NopCloser(io.MultiReader(bytes.NewReader(header[:n]), resp.Body))
+			resp.Body = &readCloser{
+				r: io.MultiReader(bytes.NewReader(header[:n]), originalBody),
+				c: originalBody,
+			}
 		}
 
 		return nil
