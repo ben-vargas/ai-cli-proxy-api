@@ -1,4 +1,6 @@
-package handlers
+// Package httpx provides HTTP transport utilities for SDK clients,
+// including automatic gzip decompression for misconfigured upstreams.
+package httpx
 
 import (
 	"bytes"
@@ -11,6 +13,9 @@ import (
 // providers return gzip data without a Content-Encoding header, which
 // confuses clients expecting JSON. This helper restores the original
 // JSON bytes while leaving plain responses untouched.
+//
+// This function is preserved for backward compatibility but new code
+// should use GzipFixupTransport instead.
 func DecodePossibleGzip(raw []byte) ([]byte, error) {
 	if len(raw) >= 2 && raw[0] == 0x1f && raw[1] == 0x8b {
 		reader, err := gzip.NewReader(bytes.NewReader(raw))

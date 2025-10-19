@@ -461,9 +461,6 @@ func (h *OpenAIAPIHandler) handleCompletionsNonStreamingResponse(c *gin.Context,
 		cliCancel(errMsg.Error)
 		return
 	}
-	if decoded, err := handlers.DecodePossibleGzip(resp); err == nil {
-		resp = decoded
-	}
 	completionsResp := convertChatCompletionsResponseToCompletions(resp)
 	_, _ = c.Writer.Write(completionsResp)
 	cliCancel()

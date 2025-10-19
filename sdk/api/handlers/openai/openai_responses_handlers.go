@@ -113,9 +113,6 @@ func (h *OpenAIResponsesAPIHandler) handleNonStreamingResponse(c *gin.Context, r
 		h.WriteErrorResponse(c, errMsg)
 		return
 	}
-	if decoded, err := handlers.DecodePossibleGzip(resp); err == nil {
-		resp = decoded
-	}
 	_, _ = c.Writer.Write(resp)
 	return
 
