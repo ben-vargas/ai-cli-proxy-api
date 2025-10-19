@@ -42,7 +42,7 @@ func (m *AmpModule) registerManagementRoutes(engine *gin.Engine, proxyHandler gi
 //	/api/provider/openai/v1/chat/completions
 //	/api/provider/anthropic/v1/messages
 //	/api/provider/google/v1beta/models
-func (m *AmpModule) registerProviderAliases(engine *gin.Engine, baseHandler *handlers.BaseAPIHandler) {
+func (m *AmpModule) registerProviderAliases(engine *gin.Engine, baseHandler *handlers.BaseAPIHandler, auth gin.HandlerFunc) {
 	// Create handler instances for different providers
 	openaiHandlers := openai.NewOpenAIAPIHandler(baseHandler)
 	geminiHandlers := gemini.NewGeminiAPIHandler(baseHandler)
@@ -51,7 +51,9 @@ func (m *AmpModule) registerProviderAliases(engine *gin.Engine, baseHandler *han
 
 	// Provider-specific routes under /api/provider/:provider
 	ampProviders := engine.Group("/api/provider")
-	ampProviders.Use(m.authMiddleware())
+	if auth != nil {
+		ampProviders.Use(auth)
+	}
 
 	provider := ampProviders.Group("/:provider")
 

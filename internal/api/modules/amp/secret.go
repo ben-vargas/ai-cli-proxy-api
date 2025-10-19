@@ -70,17 +70,6 @@ func NewMultiSourceSecretWithPath(explicitKey string, filePath string, cacheTTL 
 // Get retrieves the Amp API key using precedence: config > env > file
 // Results are cached for cacheTTL duration to avoid excessive file reads
 func (s *MultiSourceSecret) Get(ctx context.Context) (string, error) {
-	// Check cache first (for file-based secrets only, since config/env are already fast)
-	s.mu.RLock()
-	if s.cache != nil && time.Now().Before(s.cache.expiresAt) {
-		value := s.cache.value
-		s.mu.RUnlock()
-		if value != "" {
-			return value, nil
-		}
-	}
-	s.mu.RUnlock()
-
 	// Precedence 1: Explicit config key (highest priority, no caching needed)
 	if s.explicitKey != "" {
 		return s.explicitKey, nil
@@ -92,6 +81,16 @@ func (s *MultiSourceSecret) Get(ctx context.Context) (string, error) {
 	}
 
 	// Precedence 3: File-based secret (lowest priority, cached)
+	// Check cache first
+	s.mu.RLock()
+	if s.cache != nil && time.Now().Before(s.cache.expiresAt) {
+		value := s.cache.value
+		s.mu.RUnlock()
+		return value, nil
+	}
+	s.mu.RUnlock()
+
+	// Cache miss or expired - read from file
 	key, err := s.readFromFile()
 	if err != nil {
 		// Cache empty result to avoid repeated file reads on missing files

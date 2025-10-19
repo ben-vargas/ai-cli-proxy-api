@@ -20,6 +20,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/access"
 	managementHandlers "github.com/router-for-me/CLIProxyAPI/v6/internal/api/handlers/management"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/api/middleware"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/api/modules"
 	ampmodule "github.com/router-for-me/CLIProxyAPI/v6/internal/api/modules/amp"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
@@ -239,9 +240,15 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	// Setup routes
 	s.setupRoutes()
 
-	// Register Amp module if configured
-	ampModule := ampmodule.New(accessManager, AuthMiddleware(accessManager))
-	if err := ampModule.Register(engine, s.handlers, cfg); err != nil {
+	// Register Amp module using V2 interface with Context
+	ampModule := ampmodule.NewLegacy(accessManager, AuthMiddleware(accessManager))
+	ctx := modules.Context{
+		Engine:         engine,
+		BaseHandler:    s.handlers,
+		Config:         cfg,
+		AuthMiddleware: AuthMiddleware(accessManager),
+	}
+	if err := modules.RegisterModule(ctx, ampModule); err != nil {
 		log.Errorf("Failed to register Amp module: %v", err)
 	}
 
