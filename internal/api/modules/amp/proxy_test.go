@@ -3,6 +3,7 @@ package amp
 import (
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -150,6 +151,44 @@ func TestModifyResponse_GzipScenarios(t *testing.T) {
 				t.Fatalf("Content-Encoding: want %q, got %q", tc.wantCE, ce)
 			}
 		})
+	}
+}
+
+func TestModifyResponse_UpdatesContentLengthHeader(t *testing.T) {
+	proxy, err := createReverseProxy("http://example.com", NewStaticSecretSource("k"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	goodJSON := []byte(`{"message":"test response"}`)
+	gzipped := gzipBytes(goodJSON)
+
+	// Simulate upstream response with gzip body AND Content-Length header
+	// (this is the scenario the bot flagged - stale Content-Length after decompression)
+	resp := mkResp(200, http.Header{
+		"Content-Length": []string{fmt.Sprintf("%d", len(gzipped))}, // Compressed size
+	}, gzipped)
+
+	if err := proxy.ModifyResponse(resp); err != nil {
+		t.Fatalf("ModifyResponse error: %v", err)
+	}
+
+	// Verify body is decompressed
+	got, _ := io.ReadAll(resp.Body)
+	if !bytes.Equal(got, goodJSON) {
+		t.Fatalf("body should be decompressed, got: %q, want: %q", got, goodJSON)
+	}
+
+	// Verify Content-Length header is updated to decompressed size
+	wantCL := fmt.Sprintf("%d", len(goodJSON))
+	gotCL := resp.Header.Get("Content-Length")
+	if gotCL != wantCL {
+		t.Fatalf("Content-Length header mismatch: want %q (decompressed), got %q", wantCL, gotCL)
+	}
+
+	// Verify struct field also matches
+	if resp.ContentLength != int64(len(goodJSON)) {
+		t.Fatalf("resp.ContentLength mismatch: want %d, got %d", len(goodJSON), resp.ContentLength)
 	}
 }
 

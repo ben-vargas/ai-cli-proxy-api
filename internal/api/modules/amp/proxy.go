@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -101,7 +102,12 @@ func createReverseProxy(upstreamURL string, secretSource SecretSource) (*httputi
 			// Replace body with decompressed content
 			resp.Body = io.NopCloser(bytes.NewReader(decompressed))
 			resp.ContentLength = int64(len(decompressed))
-			resp.Header.Del("Content-Encoding") // Ensure it's clear this is not compressed
+
+			// Update headers to reflect decompressed state
+			resp.Header.Del("Content-Encoding")                                      // No longer compressed
+			resp.Header.Del("Content-Length")                                        // Remove stale compressed length
+			resp.Header.Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10)) // Set decompressed length
+
 			log.Debugf("amp proxy: decompressed gzip response (%d -> %d bytes)", len(gzippedData), len(decompressed))
 		} else {
 			// Not gzip - restore original body with peeked bytes
