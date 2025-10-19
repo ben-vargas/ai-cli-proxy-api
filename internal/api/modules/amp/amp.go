@@ -129,8 +129,9 @@ func (m *AmpModule) Register(ctx modules.Context) error {
 		m.enabled = true
 
 		// Register management proxy routes (requires upstream)
+		// Restrict to localhost by default for security (prevents drive-by browser attacks)
 		handler := proxyHandler(proxy)
-		m.registerManagementRoutes(ctx.Engine, handler)
+		m.registerManagementRoutes(ctx.Engine, handler, ctx.Config.AmpRestrictManagementToLocalhost)
 
 		log.Infof("Amp upstream proxy enabled for: %s", upstreamURL)
 		log.Debug("Amp provider alias routes registered")

@@ -28,6 +28,11 @@ type Config struct {
 	// AmpUpstreamAPIKey optionally overrides the Authorization header when proxying Amp upstream calls.
 	AmpUpstreamAPIKey string `yaml:"amp-upstream-api-key" json:"amp-upstream-api-key"`
 
+	// AmpRestrictManagementToLocalhost restricts Amp management routes (/api/user, /api/threads, etc.)
+	// to only accept connections from localhost (127.0.0.1, ::1). When true, prevents drive-by
+	// browser attacks and remote access to management endpoints. Default: true (recommended).
+	AmpRestrictManagementToLocalhost bool `yaml:"amp-restrict-management-to-localhost" json:"amp-restrict-management-to-localhost"`
+
 	// AuthDir is the directory where authentication token files are stored.
 	AuthDir string `yaml:"auth-dir" json:"-"`
 
@@ -189,6 +194,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	// Set defaults before unmarshal so that absent keys keep defaults.
 	cfg.LoggingToFile = false
 	cfg.UsageStatisticsEnabled = false
+	cfg.AmpRestrictManagementToLocalhost = true // Default to secure: only localhost access
 	if err = yaml.Unmarshal(data, &cfg); err != nil {
 		if optional {
 			// In cloud deploy mode, if YAML parsing fails, return empty config instead of error.

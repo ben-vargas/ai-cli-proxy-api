@@ -1,6 +1,7 @@
 package amp
 
 import (
+	"net"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -8,12 +9,74 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/api/handlers/claude"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/api/handlers/gemini"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/api/handlers/openai"
+	log "github.com/sirupsen/logrus"
 )
+
+// localhostOnlyMiddleware restricts access to localhost (127.0.0.1, ::1) only.
+// Returns 403 Forbidden for non-localhost clients.
+func localhostOnlyMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		clientIP := c.ClientIP()
+		
+		// Parse the IP to handle both IPv4 and IPv6
+		ip := net.ParseIP(clientIP)
+		if ip == nil {
+			log.Warnf("Amp management: invalid client IP %s, denying access", clientIP)
+			c.AbortWithStatusJSON(403, gin.H{
+				"error": "Access denied: management routes restricted to localhost",
+			})
+			return
+		}
+		
+		// Check if IP is loopback (127.0.0.1 or ::1)
+		if !ip.IsLoopback() {
+			log.Warnf("Amp management: non-localhost IP %s attempted access, denying", clientIP)
+			c.AbortWithStatusJSON(403, gin.H{
+				"error": "Access denied: management routes restricted to localhost",
+			})
+			return
+		}
+		
+		c.Next()
+	}
+}
+
+// noCORSMiddleware disables CORS for management routes to prevent browser-based attacks.
+// This overwrites any global CORS headers set by the server.
+func noCORSMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Remove CORS headers to prevent cross-origin access from browsers
+		c.Header("Access-Control-Allow-Origin", "")
+		c.Header("Access-Control-Allow-Methods", "")
+		c.Header("Access-Control-Allow-Headers", "")
+		c.Header("Access-Control-Allow-Credentials", "")
+		
+		// For OPTIONS preflight, deny with 403
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(403)
+			return
+		}
+		
+		c.Next()
+	}
+}
 
 // registerManagementRoutes registers Amp management proxy routes
 // These routes proxy through to the Amp control plane for OAuth, user management, etc.
-func (m *AmpModule) registerManagementRoutes(engine *gin.Engine, proxyHandler gin.HandlerFunc) {
+// If restrictToLocalhost is true, routes will only accept connections from 127.0.0.1/::1.
+func (m *AmpModule) registerManagementRoutes(engine *gin.Engine, proxyHandler gin.HandlerFunc, restrictToLocalhost bool) {
 	ampAPI := engine.Group("/api")
+	
+	// Always disable CORS for management routes to prevent browser-based attacks
+	ampAPI.Use(noCORSMiddleware())
+	
+	// Apply localhost-only restriction if configured
+	if restrictToLocalhost {
+		ampAPI.Use(localhostOnlyMiddleware())
+		log.Info("Amp management routes restricted to localhost only (CORS disabled)")
+	} else {
+		log.Warn("⚠️  Amp management routes are NOT restricted to localhost - this is insecure!")
+	}
 
 	// Management routes - these are proxied directly to Amp upstream
 	ampAPI.Any("/internal", proxyHandler)

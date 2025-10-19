@@ -21,7 +21,7 @@ func TestRegisterManagementRoutes(t *testing.T) {
 	}
 
 	m := &AmpModule{}
-	m.registerManagementRoutes(r, proxyHandler)
+	m.registerManagementRoutes(r, proxyHandler, false) // false = don't restrict to localhost in tests
 
 	managementPaths := []string{
 		"/api/internal",

