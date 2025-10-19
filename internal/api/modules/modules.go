@@ -30,8 +30,9 @@ type RouteModule interface {
 // on additional functionality without conflicting with upstream changes.
 //
 // Example usage:
-//   ampModule := amp.New(accessManager)
-//   server := api.NewServer(cfg, accessManager, api.WithModules(ampModule))
+//
+//	ampModule := amp.New(accessManager)
+//	server := api.NewServer(cfg, accessManager, api.WithModules(ampModule))
 func WithModules(modules ...RouteModule) func(func(*gin.Engine, *handlers.BaseAPIHandler, *config.Config)) {
 	return func(registerFn func(*gin.Engine, *handlers.BaseAPIHandler, *config.Config)) {
 		// This is a helper that would be used with WithRouterConfigurator

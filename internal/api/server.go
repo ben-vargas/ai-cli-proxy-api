@@ -238,13 +238,13 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 
 	// Setup routes
 	s.setupRoutes()
-	
+
 	// Register Amp module if configured
 	ampModule := ampmodule.New(accessManager, AuthMiddleware(accessManager))
 	if err := ampModule.Register(engine, s.handlers, cfg); err != nil {
 		log.Errorf("Failed to register Amp module: %v", err)
 	}
-	
+
 	// Apply additional router configurators from options
 	if optionState.routerConfigurator != nil {
 		optionState.routerConfigurator(engine, s.handlers, cfg)

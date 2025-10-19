@@ -131,7 +131,7 @@ func createReverseProxy(upstreamURL string, secretSource SecretSource) (*httputi
 // isStreamingResponse detects if the response is streaming (SSE or chunked)
 func isStreamingResponse(resp *http.Response) bool {
 	contentType := resp.Header.Get("Content-Type")
-	
+
 	// Check for Server-Sent Events
 	if strings.Contains(contentType, "text/event-stream") {
 		return true

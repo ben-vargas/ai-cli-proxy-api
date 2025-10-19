@@ -46,8 +46,14 @@ func (m *AmpModule) Name() string {
 // on Amp functionality without touching setupRoutes().
 func (m *AmpModule) Register(engine *gin.Engine, baseHandler *handlers.BaseAPIHandler, cfg *config.Config) error {
 	upstreamURL := strings.TrimSpace(cfg.AmpUpstreamURL)
+
+	// Always register provider aliases - these work without an upstream
+	m.registerProviderAliases(engine, baseHandler)
+
+	// If no upstream URL, skip proxy routes but provider aliases are still available
 	if upstreamURL == "" {
-		log.Debug("Amp routing disabled (no upstream URL configured)")
+		log.Debug("Amp upstream proxy disabled (no upstream URL configured)")
+		log.Debug("Amp provider alias routes registered")
 		m.enabled = false
 		return nil
 	}
@@ -66,12 +72,12 @@ func (m *AmpModule) Register(engine *gin.Engine, baseHandler *handlers.BaseAPIHa
 	m.proxy = proxy
 	m.enabled = true
 
-	// Register routes
+	// Register management proxy routes (requires upstream)
 	handler := proxyHandler(proxy)
 	m.registerManagementRoutes(engine, handler)
-	m.registerProviderAliases(engine, baseHandler)
 
-	log.Infof("Amp routing enabled for upstream: %s", upstreamURL)
+	log.Infof("Amp upstream proxy enabled for: %s", upstreamURL)
+	log.Debug("Amp provider alias routes registered")
 	return nil
 }
 

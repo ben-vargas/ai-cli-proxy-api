@@ -38,9 +38,10 @@ func (m *AmpModule) registerManagementRoutes(engine *gin.Engine, proxyHandler gi
 
 // registerProviderAliases registers /api/provider/{provider}/... routes
 // These allow Amp CLI to route requests like:
-//   /api/provider/openai/v1/chat/completions
-//   /api/provider/anthropic/v1/messages
-//   /api/provider/google/v1beta/models
+//
+//	/api/provider/openai/v1/chat/completions
+//	/api/provider/anthropic/v1/messages
+//	/api/provider/google/v1beta/models
 func (m *AmpModule) registerProviderAliases(engine *gin.Engine, baseHandler *handlers.BaseAPIHandler) {
 	// Create handler instances for different providers
 	openaiHandlers := openai.NewOpenAIAPIHandler(baseHandler)
@@ -98,5 +99,3 @@ func (m *AmpModule) registerProviderAliases(engine *gin.Engine, baseHandler *han
 		v1betaAmp.GET("/models/:action", geminiHandlers.GeminiGetHandler)
 	}
 }
-
-
