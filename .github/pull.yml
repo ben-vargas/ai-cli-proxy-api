@@ -1,0 +1,16 @@
+# Configuration for Pull app - https://github.com/wei/pull
+# 
+# Disable automatic syncing for this repository to prevent the bot from
+# overwriting custom commits on main with upstream changes.
+#
+# This fork contains custom Amp CLI integration that should not be 
+# automatically replaced with upstream commits.
+
+version: "1"
+rules:
+  - base: main
+    upstream: router-for-me:main
+    # Disable auto-merge - pull bot will still create PRs but won't merge them
+    mergeMethod: none
+    # Alternatively, you can set autoMerge to false
+    autoMerge: false
