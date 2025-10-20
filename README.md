@@ -1,7 +1,5 @@
 # CLI Proxy API
 
-English | [中文](README_CN.md)
-
 ---
 
 ## 🔔 Important: Amp CLI Support Fork
@@ -10,12 +8,16 @@ English | [中文](README_CN.md)
 
 ### Why This Fork Exists
 
-The **Amp CLI** requires custom routing patterns to function properly. The upstream CLIProxyAPI project maintainers opted not to merge Amp-specific routing support into the main codebase to keep it focused on Factory CLI compatibility.
+The **Amp CLI** requires custom routing patterns to function properly. The upstream CLIProxyAPI project maintainers opted not to merge Amp-specific routing support into the main codebase.
 
 ### Which Version Should You Use?
 
 - **Use this fork** if you want to run **both Factory CLI and Amp CLI** with the same proxy server
 - **Use upstream** ([router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)) if you only need Factory CLI support
+
+### 📖 Complete Setup Guide
+
+**→ [USING_WITH_FACTORY_AND_AMP.md](USING_WITH_FACTORY_AND_AMP.md)** - Comprehensive guide for using this proxy with both Factory CLI (Droid) and Amp CLI and IDE extensions, including OAuth setup, configuration examples, and troubleshooting.
 
 ### Key Differences
 
@@ -87,8 +89,8 @@ Chinese providers have now been added: [Qwen Code](https://github.com/QwenLM/qwe
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/luispater/CLIProxyAPI.git
-   cd CLIProxyAPI
+   git clone https://github.com/ben-vargas/ai-cli-proxy-api.git
+   cd ai-cli-proxy-api
    ```
 
 2. Build the application:
@@ -405,13 +407,16 @@ Once configured, point your Amp CLI to this proxy:
 
 ```bash
 # Configure Amp CLI to use the proxy
-amp config set apiBase http://localhost:8317
+# Edit ~/.config/amp/settings.json and add:
+# { "amp.url": "http://localhost:8317" }
+# Or use environment variable:
+export AMP_URL=http://localhost:8317
 
 # Login via Amp OAuth (proxied through this server)
 amp login
 
 # Use Amp CLI normally
-amp chat "Hello, world!"
+amp "Hello, world!"
 ```
 
 #### Supported Amp Routes
@@ -787,6 +792,8 @@ auth.json:
 
 ## Run with Docker
 
+> **⚠️ Note:** The upstream Docker image `eceasy/cli-proxy-api:latest` does not include Amp CLI support. To use Amp CLI features, build the Docker image from this fork's source (see Docker Compose section below).
+
 Run the following command to login (Gemini OAuth on port 8085): 
 
 ```bash
@@ -799,7 +806,7 @@ Run the following command to login (OpenAI OAuth on port 1455):
 docker run --rm -p 1455:1455 -v /path/to/your/config.yaml:/CLIProxyAPI/config.yaml -v /path/to/your/auth-dir:/root/.cli-proxy-api eceasy/cli-proxy-api:latest /CLIProxyAPI/CLIProxyAPI --codex-login
 ```
 
-Run the following command to logi (Claude OAuth on port 54545):
+Run the following command to login (Claude OAuth on port 54545):
 
 ```bash
 docker run -rm -p 54545:54545 -v /path/to/your/config.yaml:/CLIProxyAPI/config.yaml -v /path/to/your/auth-dir:/root/.cli-proxy-api eceasy/cli-proxy-api:latest /CLIProxyAPI/CLIProxyAPI --claude-login
@@ -839,8 +846,8 @@ docker run --rm -p 8317:8317 -v /path/to/your/config.yaml:/CLIProxyAPI/config.ya
 
 1.  Clone the repository and navigate into the directory:
     ```bash
-    git clone https://github.com/luispater/CLIProxyAPI.git
-    cd CLIProxyAPI
+    git clone https://github.com/ben-vargas/ai-cli-proxy-api.git
+    cd ai-cli-proxy-api
     ```
 
 2.  Prepare the configuration file:
