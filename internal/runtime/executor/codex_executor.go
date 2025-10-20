@@ -78,6 +78,26 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 	body, _ = sjson.SetBytes(body, "stream", true)
 	body, _ = sjson.DeleteBytes(body, "previous_response_id")
 
+	additionalHeaders := make(map[string]string)
+	if from == "claude" {
+		userIDResult := gjson.GetBytes(req.Payload, "metadata.user_id")
+		if userIDResult.Exists() {
+			var cache codexCache
+			var hasKey bool
+			key := fmt.Sprintf("%s-%s", req.Model, userIDResult.String())
+			if cache, hasKey = codexCacheMap[key]; !hasKey || cache.Expire.Before(time.Now()) {
+				cache = codexCache{
+					ID:     uuid.New().String(),
+					Expire: time.Now().Add(1 * time.Hour),
+				}
+				codexCacheMap[key] = cache
+			}
+			additionalHeaders["Conversation_id"] = cache.ID
+			additionalHeaders["Session_id"] = cache.ID
+			body, _ = sjson.SetBytes(body, "prompt_cache_key", cache.ID)
+		}
+	}
+
 	url := strings.TrimSuffix(baseURL, "/") + "/responses"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -90,6 +110,9 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 		authLabel = auth.Label
 		authType, authValue = auth.AccountInfo()
 	}
+	for k, v := range additionalHeaders {
+		httpReq.Header.Set(k, v)
+	}
 	recordAPIRequest(ctx, e.cfg, upstreamRequestLog{
 		URL:       url,
 		Method:    http.MethodPost,
@@ -101,7 +124,6 @@ func (e *CodexExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, re
 		AuthType:  authType,
 		AuthValue: authValue,
 	})
-
 	httpClient := newProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
 	resp, err := httpClient.Do(httpReq)
 	if err != nil {
@@ -183,6 +205,26 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 
 	body, _ = sjson.DeleteBytes(body, "previous_response_id")
 
+	additionalHeaders := make(map[string]string)
+	if from == "claude" {
+		userIDResult := gjson.GetBytes(req.Payload, "metadata.user_id")
+		if userIDResult.Exists() {
+			var cache codexCache
+			var hasKey bool
+			key := fmt.Sprintf("%s-%s", req.Model, userIDResult.String())
+			if cache, hasKey = codexCacheMap[key]; !hasKey || cache.Expire.Before(time.Now()) {
+				cache = codexCache{
+					ID:     uuid.New().String(),
+					Expire: time.Now().Add(1 * time.Hour),
+				}
+				codexCacheMap[key] = cache
+			}
+			additionalHeaders["Conversation_id"] = cache.ID
+			additionalHeaders["Session_id"] = cache.ID
+			body, _ = sjson.SetBytes(body, "prompt_cache_key", cache.ID)
+		}
+	}
+
 	url := strings.TrimSuffix(baseURL, "/") + "/responses"
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -194,6 +236,9 @@ func (e *CodexExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.Au
 		authID = auth.ID
 		authLabel = auth.Label
 		authType, authValue = auth.AccountInfo()
+	}
+	for k, v := range additionalHeaders {
+		httpReq.Header.Set(k, v)
 	}
 	recordAPIRequest(ctx, e.cfg, upstreamRequestLog{
 		URL:       url,
