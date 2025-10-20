@@ -147,6 +147,7 @@ func main() {
 		}
 		return "", false
 	}
+	writableBase := util.WritablePath()
 	if value, ok := lookupEnv("PGSTORE_DSN", "pgstore_dsn"); ok {
 		usePostgresStore = true
 		pgStoreDSN = value
@@ -157,6 +158,13 @@ func main() {
 		}
 		if value, ok := lookupEnv("PGSTORE_LOCAL_PATH", "pgstore_local_path"); ok {
 			pgStoreLocalPath = value
+		}
+		if pgStoreLocalPath == "" {
+			if writableBase != "" {
+				pgStoreLocalPath = writableBase
+			} else {
+				pgStoreLocalPath = wd
+			}
 		}
 		useGitStore = false
 	}
@@ -229,11 +237,14 @@ func main() {
 			log.Infof("postgres-backed token store enabled, workspace path: %s", pgStoreInst.WorkDir())
 		}
 	} else if useObjectStore {
-		objectStoreRoot := objectStoreLocalPath
-		if objectStoreRoot == "" {
-			objectStoreRoot = wd
+		if objectStoreLocalPath == "" {
+			if writableBase != "" {
+				objectStoreLocalPath = writableBase
+			} else {
+				objectStoreLocalPath = wd
+			}
 		}
-		objectStoreRoot = filepath.Join(objectStoreRoot, "objectstore")
+		objectStoreRoot := filepath.Join(objectStoreLocalPath, "objectstore")
 		resolvedEndpoint := strings.TrimSpace(objectStoreEndpoint)
 		useSSL := true
 		if strings.Contains(resolvedEndpoint, "://") {
@@ -289,7 +300,11 @@ func main() {
 		}
 	} else if useGitStore {
 		if gitStoreLocalPath == "" {
-			gitStoreLocalPath = wd
+			if writableBase != "" {
+				gitStoreLocalPath = writableBase
+			} else {
+				gitStoreLocalPath = wd
+			}
 		}
 		gitStoreRoot = filepath.Join(gitStoreLocalPath, "gitstore")
 		authDir := filepath.Join(gitStoreRoot, "auths")

@@ -64,6 +64,10 @@ func StaticDir(configFilePath string) string {
 		return cleaned
 	}
 
+	if writable := util.WritablePath(); writable != "" {
+		return filepath.Join(writable, "static")
+	}
+
 	configFilePath = strings.TrimSpace(configFilePath)
 	if configFilePath == "" {
 		return ""

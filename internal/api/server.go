@@ -54,7 +54,11 @@ type serverOptionConfig struct {
 type ServerOption func(*serverOptionConfig)
 
 func defaultRequestLoggerFactory(cfg *config.Config, configPath string) logging.RequestLogger {
-	return logging.NewFileRequestLogger(cfg.RequestLog, "logs", filepath.Dir(configPath))
+	configDir := filepath.Dir(configPath)
+	if base := util.WritablePath(); base != "" {
+		return logging.NewFileRequestLogger(cfg.RequestLog, filepath.Join(base, "logs"), configDir)
+	}
+	return logging.NewFileRequestLogger(cfg.RequestLog, "logs", configDir)
 }
 
 // WithMiddleware appends additional Gin middleware during server construction.
@@ -235,7 +239,11 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	if optionState.localPassword != "" {
 		s.mgmt.SetLocalPassword(optionState.localPassword)
 	}
-	s.mgmt.SetLogDirectory(filepath.Join(s.currentPath, "logs"))
+	logDir := filepath.Join(s.currentPath, "logs")
+	if base := util.WritablePath(); base != "" {
+		logDir = filepath.Join(base, "logs")
+	}
+	s.mgmt.SetLogDirectory(logDir)
 	s.localPassword = optionState.localPassword
 
 	// Setup routes
@@ -392,6 +400,8 @@ func (s *Server) registerManagementRoutes() {
 	{
 		mgmt.GET("/usage", s.mgmt.GetUsageStatistics)
 		mgmt.GET("/config", s.mgmt.GetConfig)
+		mgmt.PUT("/config.yaml", s.mgmt.PutConfigYAML)
+		mgmt.GET("/config.yaml", s.mgmt.GetConfigFile)
 
 		mgmt.GET("/debug", s.mgmt.GetDebug)
 		mgmt.PUT("/debug", s.mgmt.PutDebug)
