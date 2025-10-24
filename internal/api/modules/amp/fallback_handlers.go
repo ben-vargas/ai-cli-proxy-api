@@ -50,7 +50,7 @@ func (fh *FallbackHandler) WrapHandler(handler gin.HandlerFunc) gin.HandlerFunc 
 		}
 
 		// Normalize model (handles Gemini thinking suffixes)
-		normalizedModel, _ := normalizeModel(modelName)
+		normalizedModel, _ := util.NormalizeGeminiThinkingModel(modelName)
 
 		// Check if we have providers for this model
 		providers := util.GetProviderName(normalizedModel)
@@ -102,22 +102,4 @@ func extractModelFromRequest(body []byte, c *gin.Context) string {
 	}
 
 	return ""
-}
-
-// normalizeModel applies the same normalization as the handlers
-func normalizeModel(modelName string) (string, map[string]any) {
-	baseModel, budget, include, matched := util.ParseGeminiThinkingSuffix(modelName)
-	if !matched {
-		return baseModel, nil
-	}
-	metadata := map[string]any{
-		util.GeminiOriginalModelMetadataKey: modelName,
-	}
-	if budget != nil {
-		metadata[util.GeminiThinkingBudgetMetadataKey] = *budget
-	}
-	if include != nil {
-		metadata[util.GeminiIncludeThoughtsMetadataKey] = *include
-	}
-	return baseModel, metadata
 }
