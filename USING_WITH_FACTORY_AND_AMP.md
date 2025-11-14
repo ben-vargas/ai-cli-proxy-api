@@ -169,50 +169,57 @@ Copy this entire configuration to `~/.factory/config.json` for quick setup:
       "provider": "anthropic"
     },
     {
-      "model_display_name": "Claude Sonnet 4 [Proxy]",
-      "model": "claude-sonnet-4-20250514",
-      "base_url": "http://localhost:8317",
-      "api_key": "dummy-not-used",
-      "provider": "anthropic"
-    },
-    {
-      "model_display_name": "GPT-5 [Proxy]",
-      "model": "gpt-5",
+      "model_display_name": "GPT-5.1 Low [Proxy]",
+      "model": "gpt-5.1-low",
       "base_url": "http://localhost:8317/v1",
       "api_key": "dummy-not-used",
       "provider": "openai"
     },
     {
-      "model_display_name": "GPT-5 Minimal [Proxy]",
-      "model": "gpt-5-minimal",
+      "model_display_name": "GPT-5.1 Medium [Proxy]",
+      "model": "gpt-5.1-medium",
       "base_url": "http://localhost:8317/v1",
       "api_key": "dummy-not-used",
       "provider": "openai"
     },
     {
-      "model_display_name": "GPT-5 Medium [Proxy]",
-      "model": "gpt-5-medium",
+      "model_display_name": "GPT-5.1 High [Proxy]",
+      "model": "gpt-5.1-high",
       "base_url": "http://localhost:8317/v1",
       "api_key": "dummy-not-used",
       "provider": "openai"
     },
     {
-      "model_display_name": "GPT-5 High [Proxy]",
-      "model": "gpt-5-high",
+      "model_display_name": "GPT-5.1 Codex Low [Proxy]",
+      "model": "gpt-5.1-codex-low",
       "base_url": "http://localhost:8317/v1",
       "api_key": "dummy-not-used",
       "provider": "openai"
     },
     {
-      "model_display_name": "GPT-5 Codex [Proxy]",
-      "model": "gpt-5-codex",
+      "model_display_name": "GPT-5.1 Codex Medium [Proxy]",
+      "model": "gpt-5.1-codex-medium",
       "base_url": "http://localhost:8317/v1",
       "api_key": "dummy-not-used",
       "provider": "openai"
     },
     {
-      "model_display_name": "GPT-5 Codex High [Proxy]",
-      "model": "gpt-5-codex-high",
+      "model_display_name": "GPT-5.1 Codex High [Proxy]",
+      "model": "gpt-5.1-codex-high",
+      "base_url": "http://localhost:8317/v1",
+      "api_key": "dummy-not-used",
+      "provider": "openai"
+    },
+    {
+      "model_display_name": "GPT-5.1 Codex Mini Medium [Proxy]",
+      "model": "gpt-5.1-codex-mini-medium",
+      "base_url": "http://localhost:8317/v1",
+      "api_key": "dummy-not-used",
+      "provider": "openai"
+    },
+    {
+      "model_display_name": "GPT-5.1 Codex Mini High [Proxy]",
+      "model": "gpt-5.1-codex-mini-high",
       "base_url": "http://localhost:8317/v1",
       "api_key": "dummy-not-used",
       "provider": "openai"
