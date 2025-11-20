@@ -62,8 +62,6 @@ type Result struct {
 	Model string
 	// Success marks whether the execution succeeded.
 	Success bool
-	// RetryAfter carries a provider supplied retry hint (e.g. 429 retryDelay).
-	RetryAfter *time.Duration
 	// Error describes the failure when Success is false.
 	Error *Error
 }
@@ -327,9 +325,6 @@ func (m *Manager) executeWithProvider(ctx context.Context, provider string, req 
 			if errors.As(errExec, &se) && se != nil {
 				result.Error.HTTPStatus = se.StatusCode()
 			}
-			if ra := retryAfterFromError(errExec); ra != nil {
-				result.RetryAfter = ra
-			}
 			m.MarkResult(execCtx, result)
 			lastErr = errExec
 			continue
@@ -374,9 +369,6 @@ func (m *Manager) executeCountWithProvider(ctx context.Context, provider string,
 			var se cliproxyexecutor.StatusError
 			if errors.As(errExec, &se) && se != nil {
 				result.Error.HTTPStatus = se.StatusCode()
-			}
-			if ra := retryAfterFromError(errExec); ra != nil {
-				result.RetryAfter = ra
 			}
 			m.MarkResult(execCtx, result)
 			lastErr = errExec
@@ -423,7 +415,6 @@ func (m *Manager) executeStreamWithProvider(ctx context.Context, provider string
 				rerr.HTTPStatus = se.StatusCode()
 			}
 			result := Result{AuthID: auth.ID, Provider: provider, Model: req.Model, Success: false, Error: rerr}
-			result.RetryAfter = retryAfterFromError(errStream)
 			m.MarkResult(execCtx, result)
 			lastErr = errStream
 			continue
@@ -570,23 +561,17 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 					suspendReason = "not_found"
 					shouldSuspendModel = true
 				case 429:
+					cooldown, nextLevel := nextQuotaCooldown(state.Quota.BackoffLevel)
 					var next time.Time
-					backoffLevel := state.Quota.BackoffLevel
-					if result.RetryAfter != nil {
-						next = now.Add(*result.RetryAfter)
-					} else {
-						cooldown, nextLevel := nextQuotaCooldown(backoffLevel)
-						if cooldown > 0 {
-							next = now.Add(cooldown)
-						}
-						backoffLevel = nextLevel
+					if cooldown > 0 {
+						next = now.Add(cooldown)
 					}
 					state.NextRetryAfter = next
 					state.Quota = QuotaState{
 						Exceeded:      true,
 						Reason:        "quota",
 						NextRecoverAt: next,
-						BackoffLevel:  backoffLevel,
+						BackoffLevel:  nextLevel,
 					}
 					suspendReason = "quota"
 					shouldSuspendModel = true
@@ -602,7 +587,7 @@ func (m *Manager) MarkResult(ctx context.Context, result Result) {
 				auth.UpdatedAt = now
 				updateAggregatedAvailability(auth, now)
 			} else {
-				applyAuthFailureState(auth, result.Error, result.RetryAfter, now)
+				applyAuthFailureState(auth, result.Error, now)
 			}
 		}
 
@@ -762,25 +747,6 @@ func cloneError(err *Error) *Error {
 	}
 }
 
-func retryAfterFromError(err error) *time.Duration {
-	if err == nil {
-		return nil
-	}
-	type retryAfterProvider interface {
-		RetryAfter() *time.Duration
-	}
-	rap, ok := err.(retryAfterProvider)
-	if !ok || rap == nil {
-		return nil
-	}
-	retryAfter := rap.RetryAfter()
-	if retryAfter == nil {
-		return nil
-	}
-	val := *retryAfter
-	return &val
-}
-
 func statusCodeFromResult(err *Error) int {
 	if err == nil {
 		return 0
@@ -788,7 +754,7 @@ func statusCodeFromResult(err *Error) int {
 	return err.StatusCode()
 }
 
-func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Duration, now time.Time) {
+func applyAuthFailureState(auth *Auth, resultErr *Error, now time.Time) {
 	if auth == nil {
 		return
 	}
@@ -816,17 +782,13 @@ func applyAuthFailureState(auth *Auth, resultErr *Error, retryAfter *time.Durati
 		auth.StatusMessage = "quota exhausted"
 		auth.Quota.Exceeded = true
 		auth.Quota.Reason = "quota"
+		cooldown, nextLevel := nextQuotaCooldown(auth.Quota.BackoffLevel)
 		var next time.Time
-		if retryAfter != nil {
-			next = now.Add(*retryAfter)
-		} else {
-			cooldown, nextLevel := nextQuotaCooldown(auth.Quota.BackoffLevel)
-			if cooldown > 0 {
-				next = now.Add(cooldown)
-			}
-			auth.Quota.BackoffLevel = nextLevel
+		if cooldown > 0 {
+			next = now.Add(cooldown)
 		}
 		auth.Quota.NextRecoverAt = next
+		auth.Quota.BackoffLevel = nextLevel
 		auth.NextRetryAfter = next
 	case 408, 500, 502, 503, 504:
 		auth.StatusMessage = "transient upstream error"

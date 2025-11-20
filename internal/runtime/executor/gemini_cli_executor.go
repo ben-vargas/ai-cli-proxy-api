@@ -99,89 +99,123 @@ func (e *GeminiCLIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth
 	var lastStatus int
 	var lastBody []byte
 
+	// Get max retry count from config, default to 3 if not set
+	maxRetries := e.cfg.RequestRetry
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+
 	for idx, attemptModel := range models {
-		payload := append([]byte(nil), basePayload...)
-		if action == "countTokens" {
-			payload = deleteJSONField(payload, "project")
-			payload = deleteJSONField(payload, "model")
-		} else {
-			payload = setJSONField(payload, "project", projectID)
-			payload = setJSONField(payload, "model", attemptModel)
-		}
-
-		tok, errTok := tokenSource.Token()
-		if errTok != nil {
-			err = errTok
-			return resp, err
-		}
-		updateGeminiCLITokenMetadata(auth, baseTokenData, tok)
-
-		url := fmt.Sprintf("%s/%s:%s", codeAssistEndpoint, codeAssistVersion, action)
-		if opts.Alt != "" && action != "countTokens" {
-			url = url + fmt.Sprintf("?$alt=%s", opts.Alt)
-		}
-
-		reqHTTP, errReq := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-		if errReq != nil {
-			err = errReq
-			return resp, err
-		}
-		reqHTTP.Header.Set("Content-Type", "application/json")
-		reqHTTP.Header.Set("Authorization", "Bearer "+tok.AccessToken)
-		applyGeminiCLIHeaders(reqHTTP)
-		reqHTTP.Header.Set("Accept", "application/json")
-		recordAPIRequest(ctx, e.cfg, upstreamRequestLog{
-			URL:       url,
-			Method:    http.MethodPost,
-			Headers:   reqHTTP.Header.Clone(),
-			Body:      payload,
-			Provider:  e.Identifier(),
-			AuthID:    authID,
-			AuthLabel: authLabel,
-			AuthType:  authType,
-			AuthValue: authValue,
-		})
-
-		httpResp, errDo := httpClient.Do(reqHTTP)
-		if errDo != nil {
-			recordAPIResponseError(ctx, e.cfg, errDo)
-			err = errDo
-			return resp, err
-		}
-
-		data, errRead := io.ReadAll(httpResp.Body)
-		if errClose := httpResp.Body.Close(); errClose != nil {
-			log.Errorf("gemini cli executor: close response body error: %v", errClose)
-		}
-		recordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
-		if errRead != nil {
-			recordAPIResponseError(ctx, e.cfg, errRead)
-			err = errRead
-			return resp, err
-		}
-		appendAPIResponseChunk(ctx, e.cfg, data)
-		if httpResp.StatusCode >= 200 && httpResp.StatusCode < 300 {
-			reporter.publish(ctx, parseGeminiCLIUsage(data))
-			var param any
-			out := sdktranslator.TranslateNonStream(respCtx, to, from, attemptModel, bytes.Clone(opts.OriginalRequest), payload, data, &param)
-			resp = cliproxyexecutor.Response{Payload: []byte(out)}
-			return resp, nil
-		}
-
-		lastStatus = httpResp.StatusCode
-		lastBody = append([]byte(nil), data...)
-		log.Debugf("request error, error status: %d, error body: %s", httpResp.StatusCode, summarizeErrorBody(httpResp.Header.Get("Content-Type"), data))
-		if httpResp.StatusCode == 429 {
-			if idx+1 < len(models) {
-				log.Debugf("gemini cli executor: rate limited, retrying with next model: %s", models[idx+1])
+		// Inner retry loop for 429 errors on the same model
+		for retryCount := 0; retryCount <= maxRetries; retryCount++ {
+			payload := append([]byte(nil), basePayload...)
+			if action == "countTokens" {
+				payload = deleteJSONField(payload, "project")
+				payload = deleteJSONField(payload, "model")
 			} else {
-				log.Debug("gemini cli executor: rate limited, no additional fallback model")
+				payload = setJSONField(payload, "project", projectID)
+				payload = setJSONField(payload, "model", attemptModel)
 			}
-			continue
-		}
 
-		err = newGeminiStatusErr(httpResp.StatusCode, data)
-		return resp, err
+			tok, errTok := tokenSource.Token()
+			if errTok != nil {
+				err = errTok
+				return resp, err
+			}
+			updateGeminiCLITokenMetadata(auth, baseTokenData, tok)
+
+			url := fmt.Sprintf("%s/%s:%s", codeAssistEndpoint, codeAssistVersion, action)
+			if opts.Alt != "" && action != "countTokens" {
+				url = url + fmt.Sprintf("?$alt=%s", opts.Alt)
+			}
+
+			reqHTTP, errReq := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+			if errReq != nil {
+				err = errReq
+				return resp, err
+			}
+			reqHTTP.Header.Set("Content-Type", "application/json")
+			reqHTTP.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+			applyGeminiCLIHeaders(reqHTTP)
+			reqHTTP.Header.Set("Accept", "application/json")
+			recordAPIRequest(ctx, e.cfg, upstreamRequestLog{
+				URL:       url,
+				Method:    http.MethodPost,
+				Headers:   reqHTTP.Header.Clone(),
+				Body:      payload,
+				Provider:  e.Identifier(),
+				AuthID:    authID,
+				AuthLabel: authLabel,
+				AuthType:  authType,
+				AuthValue: authValue,
+			})
+
+			httpResp, errDo := httpClient.Do(reqHTTP)
+			if errDo != nil {
+				recordAPIResponseError(ctx, e.cfg, errDo)
+				err = errDo
+				return resp, err
+			}
+
+			data, errRead := io.ReadAll(httpResp.Body)
+			if errClose := httpResp.Body.Close(); errClose != nil {
+				log.Errorf("gemini cli executor: close response body error: %v", errClose)
+			}
+			recordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
+			if errRead != nil {
+				recordAPIResponseError(ctx, e.cfg, errRead)
+				err = errRead
+				return resp, err
+			}
+			appendAPIResponseChunk(ctx, e.cfg, data)
+			if httpResp.StatusCode >= 200 && httpResp.StatusCode < 300 {
+				reporter.publish(ctx, parseGeminiCLIUsage(data))
+				var param any
+				out := sdktranslator.TranslateNonStream(respCtx, to, from, attemptModel, bytes.Clone(opts.OriginalRequest), payload, data, &param)
+				resp = cliproxyexecutor.Response{Payload: []byte(out)}
+				return resp, nil
+			}
+
+			lastStatus = httpResp.StatusCode
+			lastBody = append([]byte(nil), data...)
+			log.Debugf("request error, error status: %d, error body: %s", httpResp.StatusCode, summarizeErrorBody(httpResp.Header.Get("Content-Type"), data))
+
+			// Handle 429 rate limit errors with retry
+			if httpResp.StatusCode == 429 {
+				if retryCount < maxRetries {
+					// Parse retry delay from Google's response
+					retryDelay := parseRetryDelay(data)
+					log.Infof("gemini cli executor: rate limited (429), retrying model %s in %v (attempt %d/%d)", attemptModel, retryDelay, retryCount+1, maxRetries)
+
+					// Wait for the specified delay
+					select {
+					case <-time.After(retryDelay):
+						// Continue to next retry iteration
+						continue
+					case <-ctx.Done():
+						// Context cancelled, return immediately
+						err = ctx.Err()
+						return resp, err
+					}
+				} else {
+					// Exhausted retries for this model, try next model if available
+					if idx+1 < len(models) {
+						log.Infof("gemini cli executor: rate limited, exhausted %d retries for model %s, trying fallback model: %s", maxRetries, attemptModel, models[idx+1])
+						break // Break inner loop to try next model
+					} else {
+						log.Infof("gemini cli executor: rate limited, exhausted %d retries for model %s, no additional fallback model", maxRetries, attemptModel)
+						// No more models to try, will return error below
+					}
+				}
+			} else {
+				// Non-429 error, don't retry this model
+				err = statusErr{code: httpResp.StatusCode, msg: string(data)}
+				return resp, err
+			}
+
+			// Break inner loop if we hit this point (no retry needed or exhausted retries)
+			break
+		}
 	}
 
 	if len(lastBody) > 0 {
@@ -190,7 +224,7 @@ func (e *GeminiCLIExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth
 	if lastStatus == 0 {
 		lastStatus = 429
 	}
-	err = newGeminiStatusErr(lastStatus, lastBody)
+	err = statusErr{code: lastStatus, msg: string(lastBody)}
 	return resp, err
 }
 
@@ -235,77 +269,133 @@ func (e *GeminiCLIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 	var lastStatus int
 	var lastBody []byte
 
+	// Get max retry count from config, default to 3 if not set
+	maxRetries := e.cfg.RequestRetry
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+
 	for idx, attemptModel := range models {
-		payload := append([]byte(nil), basePayload...)
-		payload = setJSONField(payload, "project", projectID)
-		payload = setJSONField(payload, "model", attemptModel)
+		var httpResp *http.Response
+		var payload []byte
+		var errDo error
+		shouldContinueToNextModel := false
 
-		tok, errTok := tokenSource.Token()
-		if errTok != nil {
-			err = errTok
-			return nil, err
-		}
-		updateGeminiCLITokenMetadata(auth, baseTokenData, tok)
+		// Inner retry loop for 429 errors on the same model
+		for retryCount := 0; retryCount <= maxRetries; retryCount++ {
+			payload = append([]byte(nil), basePayload...)
+			payload = setJSONField(payload, "project", projectID)
+			payload = setJSONField(payload, "model", attemptModel)
 
-		url := fmt.Sprintf("%s/%s:%s", codeAssistEndpoint, codeAssistVersion, "streamGenerateContent")
-		if opts.Alt == "" {
-			url = url + "?alt=sse"
-		} else {
-			url = url + fmt.Sprintf("?$alt=%s", opts.Alt)
-		}
-
-		reqHTTP, errReq := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
-		if errReq != nil {
-			err = errReq
-			return nil, err
-		}
-		reqHTTP.Header.Set("Content-Type", "application/json")
-		reqHTTP.Header.Set("Authorization", "Bearer "+tok.AccessToken)
-		applyGeminiCLIHeaders(reqHTTP)
-		reqHTTP.Header.Set("Accept", "text/event-stream")
-		recordAPIRequest(ctx, e.cfg, upstreamRequestLog{
-			URL:       url,
-			Method:    http.MethodPost,
-			Headers:   reqHTTP.Header.Clone(),
-			Body:      payload,
-			Provider:  e.Identifier(),
-			AuthID:    authID,
-			AuthLabel: authLabel,
-			AuthType:  authType,
-			AuthValue: authValue,
-		})
-
-		httpResp, errDo := httpClient.Do(reqHTTP)
-		if errDo != nil {
-			recordAPIResponseError(ctx, e.cfg, errDo)
-			err = errDo
-			return nil, err
-		}
-		recordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
-		if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
-			data, errRead := io.ReadAll(httpResp.Body)
-			if errClose := httpResp.Body.Close(); errClose != nil {
-				log.Errorf("gemini cli executor: close response body error: %v", errClose)
-			}
-			if errRead != nil {
-				recordAPIResponseError(ctx, e.cfg, errRead)
-				err = errRead
+			tok, errTok := tokenSource.Token()
+			if errTok != nil {
+				err = errTok
 				return nil, err
 			}
-			appendAPIResponseChunk(ctx, e.cfg, data)
-			lastStatus = httpResp.StatusCode
-			lastBody = append([]byte(nil), data...)
-			log.Debugf("request error, error status: %d, error body: %s", httpResp.StatusCode, summarizeErrorBody(httpResp.Header.Get("Content-Type"), data))
-			if httpResp.StatusCode == 429 {
-				if idx+1 < len(models) {
-					log.Debugf("gemini cli executor: rate limited, retrying with next model: %s", models[idx+1])
-				} else {
-					log.Debug("gemini cli executor: rate limited, no additional fallback model")
-				}
-				continue
+			updateGeminiCLITokenMetadata(auth, baseTokenData, tok)
+
+			url := fmt.Sprintf("%s/%s:%s", codeAssistEndpoint, codeAssistVersion, "streamGenerateContent")
+			if opts.Alt == "" {
+				url = url + "?alt=sse"
+			} else {
+				url = url + fmt.Sprintf("?$alt=%s", opts.Alt)
 			}
-			err = newGeminiStatusErr(httpResp.StatusCode, data)
-			return nil, err
+
+			reqHTTP, errReq := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+			if errReq != nil {
+				err = errReq
+				return nil, err
+			}
+			reqHTTP.Header.Set("Content-Type", "application/json")
+			reqHTTP.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+			applyGeminiCLIHeaders(reqHTTP)
+			reqHTTP.Header.Set("Accept", "text/event-stream")
+			recordAPIRequest(ctx, e.cfg, upstreamRequestLog{
+				URL:       url,
+				Method:    http.MethodPost,
+				Headers:   reqHTTP.Header.Clone(),
+				Body:      payload,
+				Provider:  e.Identifier(),
+				AuthID:    authID,
+				AuthLabel: authLabel,
+				AuthType:  authType,
+				AuthValue: authValue,
+			})
+
+			httpResp, errDo = httpClient.Do(reqHTTP)
+			if errDo != nil {
+				recordAPIResponseError(ctx, e.cfg, errDo)
+				err = errDo
+				return nil, err
+			}
+			recordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
+			if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+				data, errRead := io.ReadAll(httpResp.Body)
+				if errClose := httpResp.Body.Close(); errClose != nil {
+					log.Errorf("gemini cli executor: close response body error: %v", errClose)
+				}
+				if errRead != nil {
+					recordAPIResponseError(ctx, e.cfg, errRead)
+					err = errRead
+					return nil, err
+				}
+				appendAPIResponseChunk(ctx, e.cfg, data)
+				lastStatus = httpResp.StatusCode
+				lastBody = append([]byte(nil), data...)
+				log.Debugf("request error, error status: %d, error body: %s", httpResp.StatusCode, summarizeErrorBody(httpResp.Header.Get("Content-Type"), data))
+
+				// Handle 429 rate limit errors with retry
+				if httpResp.StatusCode == 429 {
+					if retryCount < maxRetries {
+						// Parse retry delay from Google's response
+						retryDelay := parseRetryDelay(data)
+						log.Infof("gemini cli executor: rate limited (429), retrying stream model %s in %v (attempt %d/%d)", attemptModel, retryDelay, retryCount+1, maxRetries)
+
+						// Wait for the specified delay
+						select {
+						case <-time.After(retryDelay):
+							// Continue to next retry iteration
+							continue
+						case <-ctx.Done():
+							// Context cancelled, return immediately
+							err = ctx.Err()
+							return nil, err
+						}
+					} else {
+						// Exhausted retries for this model, try next model if available
+						if idx+1 < len(models) {
+							log.Infof("gemini cli executor: rate limited, exhausted %d retries for stream model %s, trying fallback model: %s", maxRetries, attemptModel, models[idx+1])
+							shouldContinueToNextModel = true
+							break // Break inner loop to try next model
+						} else {
+							log.Infof("gemini cli executor: rate limited, exhausted %d retries for stream model %s, no additional fallback model", maxRetries, attemptModel)
+							// No more models to try, will return error below
+						}
+					}
+				} else {
+					// Non-429 error, don't retry this model
+					err = statusErr{code: httpResp.StatusCode, msg: string(data)}
+					return nil, err
+				}
+
+				// Break inner loop if we hit this point (no retry needed or exhausted retries)
+				break
+			}
+
+			// Success - httpResp.StatusCode is 2xx, break out of retry loop
+			// and proceed to streaming logic below
+			break
+		}
+
+		// If we need to try the next fallback model, skip streaming logic
+		if shouldContinueToNextModel {
+			continue
+		}
+
+		// If we have a failed response (non-2xx), don't attempt streaming
+		// Continue outer loop to try next model or return error
+		if httpResp == nil || httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
+			continue
 		}
 
 		out := make(chan cliproxyexecutor.StreamChunk)
@@ -377,7 +467,7 @@ func (e *GeminiCLIExecutor) ExecuteStream(ctx context.Context, auth *cliproxyaut
 	if lastStatus == 0 {
 		lastStatus = 429
 	}
-	err = newGeminiStatusErr(lastStatus, lastBody)
+	err = statusErr{code: lastStatus, msg: string(lastBody)}
 	return nil, err
 }
 
@@ -485,7 +575,7 @@ func (e *GeminiCLIExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.
 	if lastStatus == 0 {
 		lastStatus = 429
 	}
-	return cliproxyexecutor.Response{}, newGeminiStatusErr(lastStatus, lastBody)
+	return cliproxyexecutor.Response{}, statusErr{code: lastStatus, msg: string(lastBody)}
 }
 
 func (e *GeminiCLIExecutor) Refresh(ctx context.Context, auth *cliproxyauth.Auth) (*cliproxyauth.Auth, error) {
@@ -770,25 +860,19 @@ func fixGeminiCLIImageAspectRatio(modelName string, rawJSON []byte) []byte {
 	return rawJSON
 }
 
-func newGeminiStatusErr(statusCode int, body []byte) statusErr {
-	err := statusErr{code: statusCode, msg: string(body)}
-	if statusCode == http.StatusTooManyRequests {
-		if retryAfter, parseErr := parseRetryDelay(body); parseErr == nil && retryAfter != nil {
-			err.retryAfter = retryAfter
-		}
-	}
-	return err
-}
-
 // parseRetryDelay extracts the retry delay from a Google API 429 error response.
 // The error response contains a RetryInfo.retryDelay field in the format "0.847655010s".
-// Returns the parsed duration or an error if it cannot be determined.
-func parseRetryDelay(errorBody []byte) (*time.Duration, error) {
+// Returns the duration to wait, or a default duration if parsing fails.
+func parseRetryDelay(errorBody []byte) time.Duration {
+	const defaultDelay = 1 * time.Second
+	const maxDelay = 60 * time.Second
+
 	// Try to parse the retryDelay from the error response
 	// Format: error.details[].retryDelay where @type == "type.googleapis.com/google.rpc.RetryInfo"
 	details := gjson.GetBytes(errorBody, "error.details")
 	if !details.Exists() || !details.IsArray() {
-		return nil, fmt.Errorf("no error.details found")
+		log.Debugf("parseRetryDelay: no error.details found, using default delay %v", defaultDelay)
+		return defaultDelay
 	}
 
 	for _, detail := range details.Array() {
@@ -799,12 +883,24 @@ func parseRetryDelay(errorBody []byte) (*time.Duration, error) {
 				// Parse duration string like "0.847655010s"
 				duration, err := time.ParseDuration(retryDelay)
 				if err != nil {
-					return nil, fmt.Errorf("failed to parse duration")
+					log.Debugf("parseRetryDelay: failed to parse duration %q: %v, using default", retryDelay, err)
+					return defaultDelay
 				}
-				return &duration, nil
+				// Cap at maxDelay to prevent excessive waits
+				if duration > maxDelay {
+					log.Debugf("parseRetryDelay: capping delay from %v to %v", duration, maxDelay)
+					return maxDelay
+				}
+				if duration < 0 {
+					log.Debugf("parseRetryDelay: negative delay %v, using default", duration)
+					return defaultDelay
+				}
+				log.Debugf("parseRetryDelay: using delay %v from API response", duration)
+				return duration
 			}
 		}
 	}
 
-	return nil, fmt.Errorf("no RetryInfo found")
+	log.Debugf("parseRetryDelay: no RetryInfo found, using default delay %v", defaultDelay)
+	return defaultDelay
 }
