@@ -1,0 +1,6 @@
+version: "1"
+rules:
+  - base: main
+    upstream: router-for-me:CLIProxyAPI:main
+    mergeMethod: rebase
+    mergeUnstable: false
