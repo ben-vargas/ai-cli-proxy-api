@@ -1,10 +1,12 @@
-# CLI Proxy API
+# CLIProxyAPI Plus
 
-English | [中文](README_CN.md) | [日本語](README_JA.md)
+English | [Chinese](README_CN.md)
 
-A proxy server that provides OpenAI/Gemini/Claude/Codex compatible API interfaces for CLI.
+This is the Plus version of [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), adding support for third-party providers on top of the mainline project.
 
-It now also supports OpenAI Codex (GPT models) and Claude Code via OAuth.
+All third-party provider support is maintained by community contributors; CLIProxyAPI does not provide technical support. Please contact the corresponding community maintainer if you need assistance.
+
+The Plus release stays in lockstep with the mainline features.
 
 So you can use local or multi-account CLI access with OpenAI(include Responses)/Gemini/Claude-compatible clients and SDKs.
 
@@ -116,7 +118,7 @@ These routes help you select the protocol surface, but they do not by themselves
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+This project only accepts pull requests that relate to third-party provider support. Any pull requests unrelated to third-party provider support will be rejected.
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
