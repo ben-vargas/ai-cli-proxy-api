@@ -43,38 +43,16 @@ func (m *LogFormatter) Format(entry *log.Entry) ([]byte, error) {
 
 	timestamp := entry.Time.Format("2006-01-02 15:04:05")
 	message := strings.TrimRight(entry.Message, "\r\n")
-
-	reqID := "--------"
-	if id, ok := entry.Data["request_id"].(string); ok && id != "" {
-		reqID = id
-	}
-
-	level := entry.Level.String()
-	if level == "warning" {
-		level = "warn"
-	}
-	levelStr := fmt.Sprintf("%-5s", level)
-
-	// Build fields string (only print fields in logFieldOrder)
-	var fieldsStr string
-	if len(entry.Data) > 0 {
-		var fields []string
-		for _, k := range logFieldOrder {
-			if v, ok := entry.Data[k]; ok {
-				fields = append(fields, fmt.Sprintf("%s=%v", k, v))
-			}
-		}
-		if len(fields) > 0 {
-			fieldsStr = " " + strings.Join(fields, " ")
-		}
-	}
-
-	var formatted string
+	
+	// Handle nil Caller (can happen with some log entries)
+	callerFile := "unknown"
+	callerLine := 0
 	if entry.Caller != nil {
-		formatted = fmt.Sprintf("[%s] [%s] [%s] [%s:%d] %s%s\n", timestamp, reqID, levelStr, filepath.Base(entry.Caller.File), entry.Caller.Line, message, fieldsStr)
-	} else {
-		formatted = fmt.Sprintf("[%s] [%s] [%s] %s%s\n", timestamp, reqID, levelStr, message, fieldsStr)
+		callerFile = filepath.Base(entry.Caller.File)
+		callerLine = entry.Caller.Line
 	}
+	
+	formatted := fmt.Sprintf("[%s] [%s] [%s:%d] %s\n", timestamp, entry.Level, callerFile, callerLine, message)
 	buffer.WriteString(formatted)
 
 	return buffer.Bytes(), nil
@@ -85,6 +63,7 @@ func (m *LogFormatter) Format(entry *log.Entry) ([]byte, error) {
 func SetupBaseLogger() {
 	setupOnce.Do(func() {
 		log.SetOutput(os.Stdout)
+		log.SetLevel(log.InfoLevel)
 		log.SetReportCaller(true)
 		log.SetFormatter(&LogFormatter{})
 
