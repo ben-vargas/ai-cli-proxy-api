@@ -64,15 +64,17 @@ func main() {
 	var noBrowser bool
 	var oauthCallbackPort int
 	var antigravityLogin bool
-	var kimiLogin bool
+	var kiroLogin bool
+	var kiroGoogleLogin bool
+	var kiroAWSLogin bool
+	var kiroImport bool
 	var projectID string
 	var vertexImport string
 	var vertexImportPrefix string
 	var configPath string
 	var password string
-	var tuiMode bool
-	var standalone bool
-	var localModel bool
+	var noIncognito bool
+	var useIncognito bool
 
 	// Define command-line flags for different operation modes.
 	flag.BoolVar(&login, "login", false, "Login Google Account")
@@ -80,9 +82,13 @@ func main() {
 	flag.BoolVar(&codexDeviceLogin, "codex-device-login", false, "Login to Codex using device code flow")
 	flag.BoolVar(&claudeLogin, "claude-login", false, "Login to Claude using OAuth")
 	flag.BoolVar(&noBrowser, "no-browser", false, "Don't open browser automatically for OAuth")
-	flag.IntVar(&oauthCallbackPort, "oauth-callback-port", 0, "Override OAuth callback port (defaults to provider-specific port)")
+	flag.BoolVar(&useIncognito, "incognito", false, "Open browser in incognito/private mode for OAuth (useful for multiple accounts)")
+	flag.BoolVar(&noIncognito, "no-incognito", false, "Force disable incognito mode (uses existing browser session)")
 	flag.BoolVar(&antigravityLogin, "antigravity-login", false, "Login to Antigravity using OAuth")
-	flag.BoolVar(&kimiLogin, "kimi-login", false, "Login to Kimi using OAuth")
+	flag.BoolVar(&kiroLogin, "kiro-login", false, "Login to Kiro using Google OAuth")
+	flag.BoolVar(&kiroGoogleLogin, "kiro-google-login", false, "Login to Kiro using Google OAuth (same as --kiro-login)")
+	flag.BoolVar(&kiroAWSLogin, "kiro-aws-login", false, "Login to Kiro using AWS Builder ID (device code flow)")
+	flag.BoolVar(&kiroImport, "kiro-import", false, "Import Kiro token from Kiro IDE (~/.aws/sso/cache/kiro-auth-token.json)")
 	flag.StringVar(&projectID, "project_id", "", "Project ID (Gemini only, not required)")
 	flag.StringVar(&configPath, "config", DefaultConfigPath, "Configure File Path")
 	flag.StringVar(&vertexImport, "vertex-import", "", "Import Vertex service account key JSON file")
@@ -478,8 +484,50 @@ func main() {
 	} else if claudeLogin {
 		// Handle Claude login
 		cmd.DoClaudeLogin(cfg, options)
-	} else if kimiLogin {
-		cmd.DoKimiLogin(cfg, options)
+	} else if qwenLogin {
+		cmd.DoQwenLogin(cfg, options)
+	} else if iflowLogin {
+		cmd.DoIFlowLogin(cfg, options)
+	} else if iflowCookie {
+		cmd.DoIFlowCookieAuth(cfg, options)
+	} else if kiroLogin {
+		// For Kiro auth, default to incognito mode for multi-account support
+		// Users can explicitly override with --no-incognito
+		// Note: This config mutation is safe - auth commands exit after completion
+		// and don't share config with StartService (which is in the else branch)
+		if useIncognito {
+			cfg.IncognitoBrowser = true
+		} else if noIncognito {
+			cfg.IncognitoBrowser = false
+		} else {
+			cfg.IncognitoBrowser = true // Kiro default
+		}
+		cmd.DoKiroLogin(cfg, options)
+	} else if kiroGoogleLogin {
+		// For Kiro auth, default to incognito mode for multi-account support
+		// Users can explicitly override with --no-incognito
+		// Note: This config mutation is safe - auth commands exit after completion
+		if useIncognito {
+			cfg.IncognitoBrowser = true
+		} else if noIncognito {
+			cfg.IncognitoBrowser = false
+		} else {
+			cfg.IncognitoBrowser = true // Kiro default
+		}
+		cmd.DoKiroGoogleLogin(cfg, options)
+	} else if kiroAWSLogin {
+		// For Kiro auth, default to incognito mode for multi-account support
+		// Users can explicitly override with --no-incognito
+		if useIncognito {
+			cfg.IncognitoBrowser = true
+		} else if noIncognito {
+			cfg.IncognitoBrowser = false
+		} else {
+			cfg.IncognitoBrowser = true // Kiro default
+		}
+		cmd.DoKiroAWSLogin(cfg, options)
+	} else if kiroImport {
+		cmd.DoKiroImport(cfg, options)
 	} else {
 		// In cloud deploy mode without config file, just wait for shutdown signals
 		if isCloudDeploy && !configFileExists {
