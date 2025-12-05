@@ -72,14 +72,13 @@ func ConvertGeminiCLIResponseToClaude(_ context.Context, _ string, originalReque
 
 	// Track whether tools are being used in this response chunk
 	usedTool := false
-	output := make([]byte, 0, 1024)
-	appendEvent := func(event, payload string) {
-		output = translatorcommon.AppendSSEEventString(output, event, payload, 3)
-	}
+	var sb strings.Builder
 
 	// Initialize the streaming session with a message_start event
 	// This is only sent for the very first response chunk to establish the streaming session
 	if !(*param).(*Params).HasFirstResponse {
+		sb.WriteString("event: message_start\n")
+
 		// Create the initial message structure with default values according to Claude Code API specification
 		// This follows the Claude Code API specification for streaming message initialization
 		messageStartTemplate := []byte(`{"type":"message_start","message":{"id":"msg_1nZdL29xx5MUA1yADyHTEsnR8uuvGzszyY","type":"message","role":"assistant","content":[],"model":"claude-3-5-sonnet-20241022","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":0,"output_tokens":0}}}`)
@@ -91,7 +90,7 @@ func ConvertGeminiCLIResponseToClaude(_ context.Context, _ string, originalReque
 		if responseIDResult := gjson.GetBytes(rawJSON, "response.responseId"); responseIDResult.Exists() {
 			messageStartTemplate, _ = sjson.SetBytes(messageStartTemplate, "message.id", responseIDResult.String())
 		}
-		appendEvent("message_start", string(messageStartTemplate))
+		sb.WriteString(fmt.Sprintf("data: %s\n\n\n", messageStartTemplate))
 
 		(*param).(*Params).HasFirstResponse = true
 	}
@@ -114,26 +113,26 @@ func ConvertGeminiCLIResponseToClaude(_ context.Context, _ string, originalReque
 				if partResult.Get("thought").Bool() {
 					// Continue existing thinking block if already in thinking state
 					if (*param).(*Params).ResponseType == 2 {
-						data, _ := sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"thinking_delta","thinking":""}}`, (*param).(*Params).ResponseIndex)), "delta.thinking", partTextResult.String())
-						appendEvent("content_block_delta", string(data))
-						(*param).(*Params).HasContent = true
+						sb.WriteString("event: content_block_delta\n")
+						data, _ := sjson.Set(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"thinking_delta","thinking":""}}`, (*param).(*Params).ResponseIndex), "delta.thinking", partTextResult.String())
+						sb.WriteString(fmt.Sprintf("data: %s\n\n\n", data))
 					} else {
 						// Transition from another state to thinking
 						// First, close any existing content block
 						if (*param).(*Params).ResponseType != 0 {
-							if (*param).(*Params).ResponseType == 2 {
-								// output = output + "event: content_block_delta\n"
-								// output = output + fmt.Sprintf(`data: {"type":"content_block_delta","index":%d,"delta":{"type":"signature_delta","signature":null}}`, (*param).(*Params).ResponseIndex)
-								// output = output + "\n\n\n"
-							}
-							appendEvent("content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, (*param).(*Params).ResponseIndex))
+							sb.WriteString("event: content_block_stop\n")
+							sb.WriteString(fmt.Sprintf(`data: {"type":"content_block_stop","index":%d}`, (*param).(*Params).ResponseIndex))
+							sb.WriteString("\n\n\n")
 							(*param).(*Params).ResponseIndex++
 						}
 
 						// Start a new thinking content block
-						appendEvent("content_block_start", fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":{"type":"thinking","thinking":""}}`, (*param).(*Params).ResponseIndex))
-						data, _ := sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"thinking_delta","thinking":""}}`, (*param).(*Params).ResponseIndex)), "delta.thinking", partTextResult.String())
-						appendEvent("content_block_delta", string(data))
+						sb.WriteString("event: content_block_start\n")
+						sb.WriteString(fmt.Sprintf(`data: {"type":"content_block_start","index":%d,"content_block":{"type":"thinking","thinking":""}}`, (*param).(*Params).ResponseIndex))
+						sb.WriteString("\n\n\n")
+						sb.WriteString("event: content_block_delta\n")
+						data, _ := sjson.Set(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"thinking_delta","thinking":""}}`, (*param).(*Params).ResponseIndex), "delta.thinking", partTextResult.String())
+						sb.WriteString(fmt.Sprintf("data: %s\n\n\n", data))
 						(*param).(*Params).ResponseType = 2 // Set state to thinking
 						(*param).(*Params).HasContent = true
 					}
@@ -141,26 +140,26 @@ func ConvertGeminiCLIResponseToClaude(_ context.Context, _ string, originalReque
 					// Process regular text content (user-visible output)
 					// Continue existing text block if already in content state
 					if (*param).(*Params).ResponseType == 1 {
-						data, _ := sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"text_delta","text":""}}`, (*param).(*Params).ResponseIndex)), "delta.text", partTextResult.String())
-						appendEvent("content_block_delta", string(data))
-						(*param).(*Params).HasContent = true
+						sb.WriteString("event: content_block_delta\n")
+						data, _ := sjson.Set(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"text_delta","text":""}}`, (*param).(*Params).ResponseIndex), "delta.text", partTextResult.String())
+						sb.WriteString(fmt.Sprintf("data: %s\n\n\n", data))
 					} else {
 						// Transition from another state to text content
 						// First, close any existing content block
 						if (*param).(*Params).ResponseType != 0 {
-							if (*param).(*Params).ResponseType == 2 {
-								// output = output + "event: content_block_delta\n"
-								// output = output + fmt.Sprintf(`data: {"type":"content_block_delta","index":%d,"delta":{"type":"signature_delta","signature":null}}`, (*param).(*Params).ResponseIndex)
-								// output = output + "\n\n\n"
-							}
-							appendEvent("content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, (*param).(*Params).ResponseIndex))
+							sb.WriteString("event: content_block_stop\n")
+							sb.WriteString(fmt.Sprintf(`data: {"type":"content_block_stop","index":%d}`, (*param).(*Params).ResponseIndex))
+							sb.WriteString("\n\n\n")
 							(*param).(*Params).ResponseIndex++
 						}
 
 						// Start a new text content block
-						appendEvent("content_block_start", fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":{"type":"text","text":""}}`, (*param).(*Params).ResponseIndex))
-						data, _ := sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"text_delta","text":""}}`, (*param).(*Params).ResponseIndex)), "delta.text", partTextResult.String())
-						appendEvent("content_block_delta", string(data))
+						sb.WriteString("event: content_block_start\n")
+						sb.WriteString(fmt.Sprintf(`data: {"type":"content_block_start","index":%d,"content_block":{"type":"text","text":""}}`, (*param).(*Params).ResponseIndex))
+						sb.WriteString("\n\n\n")
+						sb.WriteString("event: content_block_delta\n")
+						data, _ := sjson.Set(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"text_delta","text":""}}`, (*param).(*Params).ResponseIndex), "delta.text", partTextResult.String())
+						sb.WriteString(fmt.Sprintf("data: %s\n\n\n", data))
 						(*param).(*Params).ResponseType = 1 // Set state to content
 						(*param).(*Params).HasContent = true
 					}
@@ -174,35 +173,35 @@ func ConvertGeminiCLIResponseToClaude(_ context.Context, _ string, originalReque
 				// Handle state transitions when switching to function calls
 				// Close any existing function call block first
 				if (*param).(*Params).ResponseType == 3 {
-					appendEvent("content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, (*param).(*Params).ResponseIndex))
+					sb.WriteString("event: content_block_stop\n")
+					sb.WriteString(fmt.Sprintf(`data: {"type":"content_block_stop","index":%d}`, (*param).(*Params).ResponseIndex))
+					sb.WriteString("\n\n\n")
 					(*param).(*Params).ResponseIndex++
 					(*param).(*Params).ResponseType = 0
 				}
 
-				// Special handling for thinking state transition
-				if (*param).(*Params).ResponseType == 2 {
-					// output = output + "event: content_block_delta\n"
-					// output = output + fmt.Sprintf(`data: {"type":"content_block_delta","index":%d,"delta":{"type":"signature_delta","signature":null}}`, (*param).(*Params).ResponseIndex)
-					// output = output + "\n\n\n"
-				}
-
 				// Close any other existing content block
 				if (*param).(*Params).ResponseType != 0 {
-					appendEvent("content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, (*param).(*Params).ResponseIndex))
+					sb.WriteString("event: content_block_stop\n")
+					sb.WriteString(fmt.Sprintf(`data: {"type":"content_block_stop","index":%d}`, (*param).(*Params).ResponseIndex))
+					sb.WriteString("\n\n\n")
 					(*param).(*Params).ResponseIndex++
 				}
 
 				// Start a new tool use content block
 				// This creates the structure for a function call in Claude Code format
+				sb.WriteString("event: content_block_start\n")
+
 				// Create the tool use block with unique ID and function details
-				data := []byte(fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":{"type":"tool_use","id":"","name":"","input":{}}}`, (*param).(*Params).ResponseIndex))
-				data, _ = sjson.SetBytes(data, "content_block.id", util.SanitizeClaudeToolID(fmt.Sprintf("%s-%d-%d", fcName, time.Now().UnixNano(), atomic.AddUint64(&toolUseIDCounter, 1))))
-				data, _ = sjson.SetBytes(data, "content_block.name", fcName)
-				appendEvent("content_block_start", string(data))
+				data := fmt.Sprintf(`{"type":"content_block_start","index":%d,"content_block":{"type":"tool_use","id":"","name":"","input":{}}}`, (*param).(*Params).ResponseIndex)
+				data, _ = sjson.Set(data, "content_block.id", fmt.Sprintf("%s-%d", fcName, time.Now().UnixNano()))
+				data, _ = sjson.Set(data, "content_block.name", fcName)
+				sb.WriteString(fmt.Sprintf("data: %s\n\n\n", data))
 
 				if fcArgsResult := functionCallResult.Get("args"); fcArgsResult.Exists() {
-					data, _ = sjson.SetBytes([]byte(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"input_json_delta","partial_json":""}}`, (*param).(*Params).ResponseIndex)), "delta.partial_json", fcArgsResult.Raw)
-					appendEvent("content_block_delta", string(data))
+					sb.WriteString("event: content_block_delta\n")
+					data, _ = sjson.Set(fmt.Sprintf(`{"type":"content_block_delta","index":%d,"delta":{"type":"input_json_delta","partial_json":""}}`, (*param).(*Params).ResponseIndex), "delta.partial_json", fcArgsResult.Raw)
+					sb.WriteString(fmt.Sprintf("data: %s\n\n\n", data))
 				}
 				(*param).(*Params).ResponseType = 3
 				(*param).(*Params).HasContent = true
@@ -214,19 +213,14 @@ func ConvertGeminiCLIResponseToClaude(_ context.Context, _ string, originalReque
 	// Process usage metadata and finish reason when present in the response
 	if usageResult.Exists() && bytes.Contains(rawJSON, []byte(`"finishReason"`)) {
 		if candidatesTokenCountResult := usageResult.Get("candidatesTokenCount"); candidatesTokenCountResult.Exists() {
-			// Only send final events if we have actually output content
-			if (*param).(*Params).HasContent {
-				// Close the final content block
-				appendEvent("content_block_stop", fmt.Sprintf(`{"type":"content_block_stop","index":%d}`, (*param).(*Params).ResponseIndex))
+			// Close the final content block
+			sb.WriteString("event: content_block_stop\n")
+			sb.WriteString(fmt.Sprintf(`data: {"type":"content_block_stop","index":%d}`, (*param).(*Params).ResponseIndex))
+			sb.WriteString("\n\n\n")
 
-				// Create the message delta template with appropriate stop reason
-				template := []byte(`{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":0,"output_tokens":0}}`)
-				// Set tool_use stop reason if tools were used in this response
-				if usedTool {
-					template = []byte(`{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"input_tokens":0,"output_tokens":0}}`)
-				} else if finish := gjson.GetBytes(rawJSON, "response.candidates.0.finishReason"); finish.Exists() && finish.String() == "MAX_TOKENS" {
-					template = []byte(`{"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null},"usage":{"input_tokens":0,"output_tokens":0}}`)
-				}
+			// Send the final message delta with usage information and stop reason
+			sb.WriteString("event: message_delta\n")
+			sb.WriteString(`data: `)
 
 				// Include thinking tokens in output token count if present
 				thoughtsTokenCount := usageResult.Get("thoughtsTokenCount").Int()
@@ -235,10 +229,17 @@ func ConvertGeminiCLIResponseToClaude(_ context.Context, _ string, originalReque
 
 				appendEvent("message_delta", string(template))
 			}
+
+			// Include thinking tokens in output token count if present
+			thoughtsTokenCount := usageResult.Get("thoughtsTokenCount").Int()
+			template, _ = sjson.Set(template, "usage.output_tokens", candidatesTokenCountResult.Int()+thoughtsTokenCount)
+			template, _ = sjson.Set(template, "usage.input_tokens", usageResult.Get("promptTokenCount").Int())
+
+			sb.WriteString(template + "\n\n\n")
 		}
 	}
 
-	return [][]byte{output}
+	return []string{sb.String()}
 }
 
 // ConvertGeminiCLIResponseToClaudeNonStream converts a non-streaming Gemini CLI response to a non-streaming Claude response.
