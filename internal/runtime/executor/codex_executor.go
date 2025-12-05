@@ -720,13 +720,12 @@ func (e *CodexExecutor) cacheHelper(ctx context.Context, from sdktranslator.Form
 		userIDResult := gjson.GetBytes(req.Payload, "metadata.user_id")
 		if userIDResult.Exists() {
 			key := fmt.Sprintf("%s-%s", req.Model, userIDResult.String())
-			var ok bool
-			if cache, ok = helps.GetCodexCache(key); !ok {
-				cache = helps.CodexCache{
+			if cache, hasKey = getCodexCache(key); !hasKey || cache.Expire.Before(time.Now()) {
+				cache = codexCache{
 					ID:     uuid.New().String(),
 					Expire: time.Now().Add(1 * time.Hour),
 				}
-				helps.SetCodexCache(key, cache)
+				setCodexCache(key, cache)
 			}
 		}
 	} else if from == "openai-response" {

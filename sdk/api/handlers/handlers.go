@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/interfaces"
@@ -281,6 +280,27 @@ type BaseAPIHandler struct {
 
 	// Cfg holds the current application configuration.
 	Cfg *config.SDKConfig
+
+	// OpenAICompatProviders is a list of provider names for OpenAI compatibility.
+	openAICompatProviders []string
+	openAICompatMutex     sync.RWMutex
+}
+
+// GetOpenAICompatProviders safely returns a copy of the provider names
+func (h *BaseAPIHandler) GetOpenAICompatProviders() []string {
+	h.openAICompatMutex.RLock()
+	defer h.openAICompatMutex.RUnlock()
+	result := make([]string, len(h.openAICompatProviders))
+	copy(result, h.openAICompatProviders)
+	return result
+}
+
+// SetOpenAICompatProviders safely sets the provider names
+func (h *BaseAPIHandler) SetOpenAICompatProviders(providers []string) {
+	h.openAICompatMutex.Lock()
+	defer h.openAICompatMutex.Unlock()
+	h.openAICompatProviders = make([]string, len(providers))
+	copy(h.openAICompatProviders, providers)
 }
 
 // NewBaseAPIHandlers creates a new API handlers instance.
@@ -292,11 +312,13 @@ type BaseAPIHandler struct {
 //
 // Returns:
 //   - *BaseAPIHandler: A new API handlers instance
-func NewBaseAPIHandlers(cfg *config.SDKConfig, authManager *coreauth.Manager) *BaseAPIHandler {
-	return &BaseAPIHandler{
+func NewBaseAPIHandlers(cfg *config.SDKConfig, authManager *coreauth.Manager, openAICompatProviders []string) *BaseAPIHandler {
+	h := &BaseAPIHandler{
 		Cfg:         cfg,
 		AuthManager: authManager,
 	}
+	h.SetOpenAICompatProviders(openAICompatProviders)
+	return h
 }
 
 // UpdateClients updates the handlers' client list and configuration.
@@ -836,9 +858,35 @@ func (h *BaseAPIHandler) getRequestDetails(modelName string) (providers []string
 		return nil, "", &interfaces.ErrorMessage{StatusCode: http.StatusBadGateway, Error: fmt.Errorf("unknown provider for model %s", modelName)}
 	}
 
-	// The thinking suffix is preserved in the model name itself, so no
-	// metadata-based configuration passing is needed.
-	return providers, resolvedModelName, nil
+	// If it's a dynamic model, the normalizedModel was already set to extractedModelName.
+	// If it's a non-dynamic model, normalizedModel was set by normalizeModelMetadata.
+	// So, normalizedModel is already correctly set at this point.
+
+	return providers, normalizedModel, metadata, nil
+}
+
+func (h *BaseAPIHandler) parseDynamicModel(modelName string) (providerName, model string, isDynamic bool) {
+	var providerPart, modelPart string
+	for _, sep := range []string{"://"} {
+		if parts := strings.SplitN(modelName, sep, 2); len(parts) == 2 {
+			providerPart = parts[0]
+			modelPart = parts[1]
+			break
+		}
+	}
+
+	if providerPart == "" {
+		return "", modelName, false
+	}
+
+	// Check if the provider is a configured openai-compatibility provider
+	for _, pName := range h.GetOpenAICompatProviders() {
+		if pName == providerPart {
+			return providerPart, modelPart, true
+		}
+	}
+
+	return "", modelName, false
 }
 
 func cloneBytes(src []byte) []byte {
