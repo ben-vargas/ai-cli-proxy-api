@@ -419,7 +419,8 @@ func (e *AntigravityExecutor) Execute(ctx context.Context, auth *cliproxyauth.Au
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
 	translated = helps.ApplyPayloadConfigWithRoot(e.cfg, baseModel, "antigravity", "request", translated, originalTranslated, requestedModel)
 
-	useCredits := cliproxyauth.AntigravityCreditsRequested(ctx) && antigravityCreditsRetryEnabled(e.cfg)
+	translated = applyThinkingMetadataCLI(translated, req.Metadata, req.Model)
+	translated = normalizeAntigravityThinking(req.Model, translated)
 
 	baseURLs := antigravityBaseURLFallbackOrder(auth)
 	httpClient := newAntigravityHTTPClient(ctx, e.cfg, auth, 0)
@@ -1073,10 +1074,8 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 		return nil, err
 	}
 
-	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
-	translated = helps.ApplyPayloadConfigWithRoot(e.cfg, baseModel, "antigravity", "request", translated, originalTranslated, requestedModel)
-
-	useCredits := cliproxyauth.AntigravityCreditsRequested(ctx) && antigravityCreditsRetryEnabled(e.cfg)
+	translated = applyThinkingMetadataCLI(translated, req.Metadata, req.Model)
+	translated = normalizeAntigravityThinking(req.Model, translated)
 
 	baseURLs := antigravityBaseURLFallbackOrder(auth)
 	httpClient := newAntigravityHTTPClient(ctx, e.cfg, auth, 0)
@@ -1430,10 +1429,34 @@ func (e *AntigravityExecutor) CountTokens(ctx context.Context, auth *cliproxyaut
 			log.Debugf("antigravity executor: rate limited on base url %s, retrying with fallback base url: %s", baseURL, baseURLs[idx+1])
 			continue
 		}
-		sErr := statusErr{code: httpResp.StatusCode, msg: string(bodyBytes)}
-		if httpResp.StatusCode == http.StatusTooManyRequests {
-			if retryAfter, parseErr := parseRetryDelay(bodyBytes); parseErr == nil && retryAfter != nil {
-				sErr.retryAfter = retryAfter
+
+		now := time.Now().Unix()
+		modelConfig := registry.GetAntigravityModelConfig()
+		models := make([]*registry.ModelInfo, 0, len(result.Map()))
+		for originalName := range result.Map() {
+			aliasName := modelName2Alias(originalName)
+			if aliasName != "" {
+				modelInfo := &registry.ModelInfo{
+					ID:          aliasName,
+					Name:        aliasName,
+					Description: aliasName,
+					DisplayName: aliasName,
+					Version:     aliasName,
+					Object:      "model",
+					Created:     now,
+					OwnedBy:     antigravityAuthType,
+					Type:        antigravityAuthType,
+				}
+				// Look up Thinking support from static config using alias name
+				if cfg, ok := modelConfig[aliasName]; ok {
+					if cfg.Thinking != nil {
+						modelInfo.Thinking = cfg.Thinking
+					}
+					if cfg.MaxCompletionTokens > 0 {
+						modelInfo.MaxCompletionTokens = cfg.MaxCompletionTokens
+					}
+				}
+				models = append(models, modelInfo)
 			}
 		}
 		return cliproxyexecutor.Response{}, sErr
@@ -2242,4 +2265,94 @@ func generateProjectID() string {
 	randSourceMutex.Unlock()
 	randomPart := strings.ToLower(uuid.NewString())[:5]
 	return adj + "-" + noun + "-" + randomPart
+}
+
+func modelName2Alias(modelName string) string {
+	switch modelName {
+	case "rev19-uic3-1p":
+		return "gemini-2.5-computer-use-preview-10-2025"
+	case "gemini-3-pro-image":
+		return "gemini-3-pro-image-preview"
+	case "gemini-3-pro-high":
+		return "gemini-3-pro-preview"
+	case "claude-sonnet-4-5":
+		return "gemini-claude-sonnet-4-5"
+	case "claude-sonnet-4-5-thinking":
+		return "gemini-claude-sonnet-4-5-thinking"
+	case "claude-opus-4-5-thinking":
+		return "gemini-claude-opus-4-5-thinking"
+	case "chat_20706", "chat_23310", "gemini-2.5-flash-thinking", "gemini-3-pro-low", "gemini-2.5-pro":
+		return ""
+	default:
+		return modelName
+	}
+}
+
+func alias2ModelName(modelName string) string {
+	switch modelName {
+	case "gemini-2.5-computer-use-preview-10-2025":
+		return "rev19-uic3-1p"
+	case "gemini-3-pro-image-preview":
+		return "gemini-3-pro-image"
+	case "gemini-3-pro-preview":
+		return "gemini-3-pro-high"
+	case "gemini-claude-sonnet-4-5":
+		return "claude-sonnet-4-5"
+	case "gemini-claude-sonnet-4-5-thinking":
+		return "claude-sonnet-4-5-thinking"
+	case "gemini-claude-opus-4-5-thinking":
+		return "claude-opus-4-5-thinking"
+	default:
+		return modelName
+	}
+}
+
+// normalizeAntigravityThinking clamps or removes thinking config based on model support.
+// For Claude models, it additionally ensures thinking budget < max_tokens.
+func normalizeAntigravityThinking(model string, payload []byte) []byte {
+	payload = util.StripThinkingConfigIfUnsupported(model, payload)
+	if !util.ModelSupportsThinking(model) {
+		return payload
+	}
+	budget := gjson.GetBytes(payload, "request.generationConfig.thinkingConfig.thinkingBudget")
+	if !budget.Exists() {
+		return payload
+	}
+	raw := int(budget.Int())
+	normalized := util.NormalizeThinkingBudget(model, raw)
+
+	isClaude := strings.Contains(strings.ToLower(model), "claude")
+	if isClaude {
+		effectiveMax, setDefaultMax := antigravityEffectiveMaxTokens(model, payload)
+		if effectiveMax > 0 && normalized >= effectiveMax {
+			normalized = effectiveMax - 1
+			if normalized < 1 {
+				normalized = 1
+			}
+		}
+		if setDefaultMax {
+			if res, errSet := sjson.SetBytes(payload, "request.generationConfig.maxOutputTokens", effectiveMax); errSet == nil {
+				payload = res
+			}
+		}
+	}
+
+	updated, err := sjson.SetBytes(payload, "request.generationConfig.thinkingConfig.thinkingBudget", normalized)
+	if err != nil {
+		return payload
+	}
+	return updated
+}
+
+// antigravityEffectiveMaxTokens returns the max tokens to cap thinking:
+// prefer request-provided maxOutputTokens; otherwise fall back to model default.
+// The boolean indicates whether the value came from the model default (and thus should be written back).
+func antigravityEffectiveMaxTokens(model string, payload []byte) (max int, fromModel bool) {
+	if maxTok := gjson.GetBytes(payload, "request.generationConfig.maxOutputTokens"); maxTok.Exists() && maxTok.Int() > 0 {
+		return int(maxTok.Int()), false
+	}
+	if modelInfo := registry.GetGlobalRegistry().GetModelInfo(model); modelInfo != nil && modelInfo.MaxCompletionTokens > 0 {
+		return modelInfo.MaxCompletionTokens, true
+	}
+	return 0, false
 }

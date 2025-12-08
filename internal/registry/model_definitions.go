@@ -467,6 +467,25 @@ func GetIFlowModels() []*ModelInfo {
 	return models
 }
 
+// AntigravityModelConfig captures static antigravity model overrides, including
+// Thinking budget limits and provider max completion tokens.
+type AntigravityModelConfig struct {
+	Thinking            *ThinkingSupport
+	MaxCompletionTokens int
+}
+
+// GetAntigravityModelConfig returns static configuration for antigravity models.
+// Keys use the ALIASED model names (after modelName2Alias conversion) for direct lookup.
+func GetAntigravityModelConfig() map[string]*AntigravityModelConfig {
+	return map[string]*AntigravityModelConfig{
+		"gemini-2.5-flash":                  {Thinking: &ThinkingSupport{Min: 0, Max: 24576, ZeroAllowed: true, DynamicAllowed: true}},
+		"gemini-2.5-flash-lite":             {Thinking: &ThinkingSupport{Min: 0, Max: 24576, ZeroAllowed: true, DynamicAllowed: true}},
+		"gemini-3-pro-preview":              {Thinking: &ThinkingSupport{Min: 128, Max: 32768, ZeroAllowed: false, DynamicAllowed: true}},
+		"gemini-claude-sonnet-4-5-thinking": {Thinking: &ThinkingSupport{Min: 1024, Max: 200000, ZeroAllowed: false, DynamicAllowed: true}, MaxCompletionTokens: 64000},
+		"gemini-claude-opus-4-5-thinking":   {Thinking: &ThinkingSupport{Min: 1024, Max: 200000, ZeroAllowed: false, DynamicAllowed: true}, MaxCompletionTokens: 64000},
+	}
+}
+
 // GetGitHubCopilotModels returns the available models for GitHub Copilot.
 // These models are available through the GitHub Copilot API at api.githubcopilot.com.
 func GetGitHubCopilotModels() []*ModelInfo {

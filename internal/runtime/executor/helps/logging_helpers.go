@@ -164,7 +164,7 @@ func AppendAPIResponseChunk(ctx context.Context, cfg *config.Config, chunk []byt
 	if ginCtx == nil {
 		return
 	}
-	attempts, attempt := ensureAttempt(ginCtx)
+	_, attempt := ensureAttempt(ginCtx)
 	ensureResponseIntro(attempt)
 
 	if !attempt.headersWritten {
@@ -188,9 +188,6 @@ func AppendAPIResponseChunk(ctx context.Context, cfg *config.Config, chunk []byt
 	}
 	attempt.response.WriteString(string(data))
 	attempt.bodyHasContent = true
-	attempt.prevWasSSEEvent = currentChunkIsSSEEvent
-
-	updateAggregatedResponse(ginCtx, attempts)
 }
 
 // RecordAPIWebsocketRequest stores an upstream websocket request event in Gin context.
