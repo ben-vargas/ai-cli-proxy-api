@@ -189,11 +189,13 @@ func createReverseProxy(upstreamURL string, secretSource SecretSource) (*httputi
 
 	// Error handler for proxy failures
 	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, err error) {
-		// Client-side cancellations are common during polling; suppress logging in this case
+		// Check if this is a client-side cancellation (normal behavior)
+		// Don't log as error for context canceled - it's usually client closing connection
 		if errors.Is(err, context.Canceled) {
-			return
+			log.Debugf("amp upstream proxy: client canceled request for %s %s", req.Method, req.URL.Path)
+		} else {
+			log.Errorf("amp upstream proxy error for %s %s: %v", req.Method, req.URL.Path, err)
 		}
-		log.Errorf("amp upstream proxy error for %s %s: %v", req.Method, req.URL.Path, err)
 		rw.Header().Set("Content-Type", "application/json")
 		rw.WriteHeader(http.StatusBadGateway)
 		_, _ = rw.Write([]byte(`{"error":"amp_upstream_proxy_error","message":"Failed to reach Amp upstream"}`))
