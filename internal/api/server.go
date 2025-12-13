@@ -460,6 +460,18 @@ func (s *Server) setupRoutes() {
 		c.String(http.StatusOK, oauthCallbackSuccessHTML)
 	})
 
+	s.engine.GET("/kiro/callback", func(c *gin.Context) {
+		code := c.Query("code")
+		state := c.Query("state")
+		errStr := c.Query("error")
+		if state != "" {
+			file := fmt.Sprintf("%s/.oauth-kiro-%s.oauth", s.cfg.AuthDir, state)
+			_ = os.WriteFile(file, []byte(fmt.Sprintf(`{"code":"%s","state":"%s","error":"%s"}`, code, state, errStr)), 0o600)
+		}
+		c.Header("Content-Type", "text/html; charset=utf-8")
+		c.String(http.StatusOK, oauthCallbackSuccessHTML)
+	})
+
 	// Management routes are registered lazily by registerManagementRoutes when a secret is configured.
 }
 
@@ -657,8 +669,10 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/codex-auth-url", s.mgmt.RequestCodexToken)
 		mgmt.GET("/gemini-cli-auth-url", s.mgmt.RequestGeminiCLIToken)
 		mgmt.GET("/antigravity-auth-url", s.mgmt.RequestAntigravityToken)
-		mgmt.GET("/kimi-auth-url", s.mgmt.RequestKimiToken)
-		mgmt.POST("/oauth-callback", s.mgmt.PostOAuthCallback)
+		mgmt.GET("/qwen-auth-url", s.mgmt.RequestQwenToken)
+		mgmt.GET("/iflow-auth-url", s.mgmt.RequestIFlowToken)
+		mgmt.POST("/iflow-auth-url", s.mgmt.RequestIFlowCookieToken)
+		mgmt.GET("/kiro-auth-url", s.mgmt.RequestKiroToken)
 		mgmt.GET("/get-auth-status", s.mgmt.GetAuthStatus)
 	}
 }
