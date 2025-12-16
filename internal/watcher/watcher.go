@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	kiroauth "github.com/router-for-me/CLIProxyAPI/v6/internal/auth/kiro"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/geminicli"
 	"gopkg.in/yaml.v3"
 
@@ -156,7 +156,7 @@ func (w *Watcher) watchKiroIDETokenFile() {
 
 	// Kiro IDE stores tokens in ~/.aws/sso/cache/
 	kiroTokenDir := filepath.Join(homeDir, ".aws", "sso", "cache")
-	
+
 	// Check if directory exists
 	if _, statErr := os.Stat(kiroTokenDir); os.IsNotExist(statErr) {
 		log.Debugf("Kiro IDE token directory does not exist: %s", kiroTokenDir)
@@ -669,16 +669,16 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 	configOps := fsnotify.Write | fsnotify.Create | fsnotify.Rename
 	isConfigEvent := event.Name == w.configPath && event.Op&configOps != 0
 	authOps := fsnotify.Create | fsnotify.Write | fsnotify.Remove | fsnotify.Rename
-	isAuthJSON := strings.HasPrefix(event.Name, w.authDir) && strings.HasSuffix(event.Name, ".json") && event.Op&authOps != 0
-	
+	isAuthJSON := strings.HasPrefix(normalizedName, normalizedAuthDir) && strings.HasSuffix(normalizedName, ".json") && event.Op&authOps != 0
+
 	// Check for Kiro IDE token file changes
 	isKiroIDEToken := w.isKiroIDETokenFile(event.Name) && event.Op&authOps != 0
-	
+
 	if !isConfigEvent && !isAuthJSON && !isKiroIDEToken {
 		// Ignore unrelated files (e.g., cookie snapshots *.cookie) and other noise.
 		return
 	}
-	
+
 	// Handle Kiro IDE token file changes
 	if isKiroIDEToken {
 		w.handleKiroIDETokenChange(event)
@@ -773,7 +773,7 @@ func (w *Watcher) handleKiroIDETokenChange(event fsnotify.Event) {
 	log.Infof("Kiro IDE token file updated, access token refreshed (provider: %s)", tokenData.Provider)
 
 	// Trigger auth state refresh to pick up the new token
-	w.refreshAuthState()
+	w.refreshAuthState(true)
 
 	// Notify callback if set
 	w.clientsMutex.RLock()
@@ -1370,7 +1370,7 @@ func (w *Watcher) SnapshotCoreAuths() []*coreauth.Auth {
 			continue
 		}
 		t, _ := metadata["type"].(string)
-		
+
 		// Detect Kiro auth files by auth_method field (they don't have "type" field)
 		if t == "" {
 			if authMethod, _ := metadata["auth_method"].(string); authMethod == "builder-id" || authMethod == "social" {
@@ -1378,7 +1378,7 @@ func (w *Watcher) SnapshotCoreAuths() []*coreauth.Auth {
 				log.Debugf("SnapshotCoreAuths: detected Kiro auth by auth_method: %s", name)
 			}
 		}
-		
+
 		if t == "" {
 			log.Debugf("SnapshotCoreAuths: skipping file without type: %s", name)
 			continue
@@ -1431,7 +1431,7 @@ func (w *Watcher) SnapshotCoreAuths() []*coreauth.Auth {
 					a.NextRefreshAfter = expiresAt.Add(-30 * time.Minute)
 				}
 			}
-			
+
 			// Apply global preferred endpoint setting if not present in metadata
 			if cfg.KiroPreferredEndpoint != "" {
 				// Check if already set in metadata (which takes precedence in executor)
