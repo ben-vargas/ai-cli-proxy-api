@@ -47,10 +47,8 @@ type ModelInfo struct {
 	MaxCompletionTokens int `json:"max_completion_tokens,omitempty"`
 	// SupportedParameters lists supported parameters
 	SupportedParameters []string `json:"supported_parameters,omitempty"`
-	// SupportedInputModalities lists supported input modalities (e.g., TEXT, IMAGE, VIDEO, AUDIO)
-	SupportedInputModalities []string `json:"supportedInputModalities,omitempty"`
-	// SupportedOutputModalities lists supported output modalities (e.g., TEXT, IMAGE)
-	SupportedOutputModalities []string `json:"supportedOutputModalities,omitempty"`
+	// SupportedEndpoints lists supported API endpoints (e.g., "/chat/completions", "/responses").
+	SupportedEndpoints []string `json:"supported_endpoints,omitempty"`
 
 	// Thinking holds provider-specific reasoning/thinking budget capabilities.
 	// This is optional and currently used for Gemini thinking budget normalization.
@@ -531,18 +529,8 @@ func cloneModelInfo(model *ModelInfo) *ModelInfo {
 	if len(model.SupportedParameters) > 0 {
 		copyModel.SupportedParameters = append([]string(nil), model.SupportedParameters...)
 	}
-	if len(model.SupportedInputModalities) > 0 {
-		copyModel.SupportedInputModalities = append([]string(nil), model.SupportedInputModalities...)
-	}
-	if len(model.SupportedOutputModalities) > 0 {
-		copyModel.SupportedOutputModalities = append([]string(nil), model.SupportedOutputModalities...)
-	}
-	if model.Thinking != nil {
-		copyThinking := *model.Thinking
-		if len(model.Thinking.Levels) > 0 {
-			copyThinking.Levels = append([]string(nil), model.Thinking.Levels...)
-		}
-		copyModel.Thinking = &copyThinking
+	if len(model.SupportedEndpoints) > 0 {
+		copyModel.SupportedEndpoints = append([]string(nil), model.SupportedEndpoints...)
 	}
 	return &copyModel
 }
@@ -1140,6 +1128,9 @@ func (r *ModelRegistry) convertModelToMap(model *ModelInfo, handlerType string) 
 		}
 		if len(model.SupportedParameters) > 0 {
 			result["supported_parameters"] = append([]string(nil), model.SupportedParameters...)
+		}
+		if len(model.SupportedEndpoints) > 0 {
+			result["supported_endpoints"] = model.SupportedEndpoints
 		}
 		return result
 
