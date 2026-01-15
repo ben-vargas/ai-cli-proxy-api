@@ -512,6 +512,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Description:         "OpenAI GPT-5 via GitHub Copilot",
 			ContextLength:       200000,
 			MaxCompletionTokens: 32768,
+			SupportedEndpoints:  []string{"/chat/completions", "/responses"},
 		},
 		{
 			ID:                  "gpt-5-mini",
@@ -523,6 +524,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Description:         "OpenAI GPT-5 Mini via GitHub Copilot",
 			ContextLength:       128000,
 			MaxCompletionTokens: 16384,
+			SupportedEndpoints:  []string{"/chat/completions", "/responses"},
 		},
 		{
 			ID:                  "gpt-5-codex",
@@ -534,6 +536,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Description:         "OpenAI GPT-5 Codex via GitHub Copilot",
 			ContextLength:       200000,
 			MaxCompletionTokens: 32768,
+			SupportedEndpoints:  []string{"/responses"},
 		},
 		{
 			ID:                  "gpt-5.1",
@@ -545,6 +548,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Description:         "OpenAI GPT-5.1 via GitHub Copilot",
 			ContextLength:       200000,
 			MaxCompletionTokens: 32768,
+			SupportedEndpoints:  []string{"/chat/completions", "/responses"},
 		},
 		{
 			ID:                  "gpt-5.1-codex",
@@ -556,6 +560,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Description:         "OpenAI GPT-5.1 Codex via GitHub Copilot",
 			ContextLength:       200000,
 			MaxCompletionTokens: 32768,
+			SupportedEndpoints:  []string{"/responses"},
 		},
 		{
 			ID:                  "gpt-5.1-codex-mini",
@@ -567,6 +572,19 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Description:         "OpenAI GPT-5.1 Codex Mini via GitHub Copilot",
 			ContextLength:       128000,
 			MaxCompletionTokens: 16384,
+			SupportedEndpoints:  []string{"/responses"},
+		},
+		{
+			ID:                  "gpt-5.1-codex-max",
+			Object:              "model",
+			Created:             now,
+			OwnedBy:             "github-copilot",
+			Type:                "github-copilot",
+			DisplayName:         "GPT-5.1 Codex Max",
+			Description:         "OpenAI GPT-5.1 Codex Max via GitHub Copilot",
+			ContextLength:       200000,
+			MaxCompletionTokens: 32768,
+			SupportedEndpoints:  []string{"/responses"},
 		},
 		{
 			ID:                  "gpt-5.2",
@@ -578,6 +596,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Description:         "OpenAI GPT-5.2 via GitHub Copilot",
 			ContextLength:       200000,
 			MaxCompletionTokens: 32768,
+			SupportedEndpoints:  []string{"/chat/completions", "/responses"},
 		},
 		{
 			ID:                  "gpt-5.2-codex",
@@ -589,6 +608,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Description:         "OpenAI GPT-5.2 Codex via GitHub Copilot",
 			ContextLength:       200000,
 			MaxCompletionTokens: 32768,
+			SupportedEndpoints:  []string{"/responses"},
 		},
 		{
 			ID:                  "claude-haiku-4.5",
@@ -600,6 +620,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Description:         "Anthropic Claude Haiku 4.5 via GitHub Copilot",
 			ContextLength:       200000,
 			MaxCompletionTokens: 64000,
+			SupportedEndpoints:  []string{"/chat/completions"},
 		},
 		{
 			ID:                  "claude-opus-4.1",
@@ -611,6 +632,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Description:         "Anthropic Claude Opus 4.1 via GitHub Copilot",
 			ContextLength:       200000,
 			MaxCompletionTokens: 32000,
+			SupportedEndpoints:  []string{"/chat/completions"},
 		},
 		{
 			ID:                  "claude-opus-4.5",
@@ -622,6 +644,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Description:         "Anthropic Claude Opus 4.5 via GitHub Copilot",
 			ContextLength:       200000,
 			MaxCompletionTokens: 64000,
+			SupportedEndpoints:  []string{"/chat/completions"},
 		},
 		{
 			ID:                  "claude-sonnet-4",
@@ -633,6 +656,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Description:         "Anthropic Claude Sonnet 4 via GitHub Copilot",
 			ContextLength:       200000,
 			MaxCompletionTokens: 64000,
+			SupportedEndpoints:  []string{"/chat/completions"},
 		},
 		{
 			ID:                  "claude-sonnet-4.5",
@@ -644,6 +668,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Description:         "Anthropic Claude Sonnet 4.5 via GitHub Copilot",
 			ContextLength:       200000,
 			MaxCompletionTokens: 64000,
+			SupportedEndpoints:  []string{"/chat/completions"},
 		},
 		{
 			ID:                  "gemini-2.5-pro",
@@ -657,13 +682,24 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			MaxCompletionTokens: 65536,
 		},
 		{
-			ID:                  "gemini-3-pro",
+			ID:                  "gemini-3-pro-preview",
 			Object:              "model",
 			Created:             now,
 			OwnedBy:             "github-copilot",
 			Type:                "github-copilot",
-			DisplayName:         "Gemini 3 Pro",
-			Description:         "Google Gemini 3 Pro via GitHub Copilot",
+			DisplayName:         "Gemini 3 Pro (Preview)",
+			Description:         "Google Gemini 3 Pro Preview via GitHub Copilot",
+			ContextLength:       1048576,
+			MaxCompletionTokens: 65536,
+		},
+		{
+			ID:                  "gemini-3-flash-preview",
+			Object:              "model",
+			Created:             now,
+			OwnedBy:             "github-copilot",
+			Type:                "github-copilot",
+			DisplayName:         "Gemini 3 Flash (Preview)",
+			Description:         "Google Gemini 3 Flash Preview via GitHub Copilot",
 			ContextLength:       1048576,
 			MaxCompletionTokens: 65536,
 		},
@@ -679,15 +715,16 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			MaxCompletionTokens: 16384,
 		},
 		{
-			ID:                  "raptor-mini",
+			ID:                  "oswe-vscode-prime",
 			Object:              "model",
 			Created:             now,
 			OwnedBy:             "github-copilot",
 			Type:                "github-copilot",
-			DisplayName:         "Raptor Mini",
-			Description:         "Raptor Mini via GitHub Copilot",
+			DisplayName:         "Raptor mini (Preview)",
+			Description:         "Raptor mini via GitHub Copilot",
 			ContextLength:       128000,
 			MaxCompletionTokens: 16384,
+			SupportedEndpoints:  []string{"/chat/completions", "/responses"},
 		},
 	}
 }
