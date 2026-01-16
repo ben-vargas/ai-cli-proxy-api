@@ -134,8 +134,8 @@ type Config struct {
 	// Supported channels: gemini-cli, vertex, aistudio, antigravity, claude, codex, qwen, iflow, kiro, github-copilot.
 	OAuthExcludedModels map[string][]string `yaml:"oauth-excluded-models,omitempty" json:"oauth-excluded-models,omitempty"`
 
-	// OAuthModelMappings defines global model name mappings for OAuth/file-backed auth channels.
-	// These mappings affect both model listing and model routing for supported channels:
+	// OAuthModelAlias defines global model name aliases for OAuth/file-backed auth channels.
+	// These aliases affect both model listing and model routing for supported channels:
 	// gemini-cli, vertex, aistudio, antigravity, claude, codex, qwen, iflow, kiro, github-copilot.
 	//
 	// NOTE: This does not apply to existing per-credential model alias features under:
