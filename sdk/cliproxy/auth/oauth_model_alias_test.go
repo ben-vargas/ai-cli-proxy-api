@@ -44,6 +44,15 @@ func TestResolveOAuthUpstreamModel_SuffixPreservation(t *testing.T) {
 			want:    "gemini-2.5-pro-exp-03-25",
 		},
 		{
+			name: "kiro alias resolves",
+			aliases: map[string][]internalconfig.OAuthModelAlias{
+				"kiro": {{Name: "kiro-claude-sonnet-4-5", Alias: "sonnet"}},
+			},
+			channel: "kiro",
+			input:   "sonnet",
+			want:    "kiro-claude-sonnet-4-5",
+		},
+		{
 			name: "config suffix takes priority",
 			aliases: map[string][]internalconfig.OAuthModelAlias{
 				"claude": {{Name: "claude-sonnet-4-5-20250514(low)", Alias: "claude-sonnet-4-5"}},
@@ -157,8 +166,12 @@ func createAuthForChannel(channel string) *Auth {
 		return &Auth{Provider: "aistudio"}
 	case "antigravity":
 		return &Auth{Provider: "antigravity"}
-	case "kimi":
-		return &Auth{Provider: "kimi"}
+	case "qwen":
+		return &Auth{Provider: "qwen"}
+	case "iflow":
+		return &Auth{Provider: "iflow"}
+	case "kiro":
+		return &Auth{Provider: "kiro"}
 	default:
 		return &Auth{Provider: channel}
 	}
