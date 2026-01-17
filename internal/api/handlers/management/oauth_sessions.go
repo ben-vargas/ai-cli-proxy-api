@@ -227,6 +227,12 @@ func NormalizeOAuthProvider(provider string) (string, error) {
 		return "gemini", nil
 	case "antigravity", "anti-gravity":
 		return "antigravity", nil
+	case "qwen":
+		return "qwen", nil
+	case "kiro":
+		return "kiro", nil
+	case "github":
+		return "github", nil
 	default:
 		return "", errUnsupportedOAuthFlow
 	}
