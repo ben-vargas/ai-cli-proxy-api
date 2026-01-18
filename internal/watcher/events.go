@@ -124,6 +124,44 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 	}
 }
 
+func (w *Watcher) isKiroIDETokenFile(path string) bool {
+	normalized := filepath.ToSlash(path)
+	return strings.HasSuffix(normalized, "kiro-auth-token.json") && strings.Contains(normalized, ".aws/sso/cache")
+}
+
+func (w *Watcher) handleKiroIDETokenChange(event fsnotify.Event) {
+	log.Debugf("Kiro IDE token file event detected: %s %s", event.Op.String(), event.Name)
+
+	if event.Op&(fsnotify.Remove|fsnotify.Rename) != 0 {
+		time.Sleep(replaceCheckDelay)
+		if _, statErr := os.Stat(event.Name); statErr != nil {
+			log.Debugf("Kiro IDE token file removed: %s", event.Name)
+			return
+		}
+	}
+
+	// Use retry logic to handle file lock contention (e.g., Kiro IDE writing the file)
+	// This prevents "being used by another process" errors on Windows
+	tokenData, err := kiroauth.LoadKiroIDETokenWithRetry(10, 50*time.Millisecond)
+	if err != nil {
+		log.Debugf("failed to load Kiro IDE token after change: %v", err)
+		return
+	}
+
+	log.Infof("Kiro IDE token file updated, access token refreshed (provider: %s)", tokenData.Provider)
+
+	w.refreshAuthState(true)
+
+	w.clientsMutex.RLock()
+	cfg := w.config
+	w.clientsMutex.RUnlock()
+
+	if w.reloadCallback != nil && cfg != nil {
+		log.Debugf("triggering server update callback after Kiro IDE token change")
+		w.reloadCallback(cfg)
+	}
+}
+
 func (w *Watcher) authFileUnchanged(path string) (bool, error) {
 	data, errRead := os.ReadFile(path)
 	if errRead != nil {
