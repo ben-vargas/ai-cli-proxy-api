@@ -45,3 +45,4 @@ GEMINI.md
 .DS_Store
 ._*
 .gocache/
+*.bak
