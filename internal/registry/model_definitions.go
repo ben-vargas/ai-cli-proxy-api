@@ -165,8 +165,10 @@ func cloneModelInfos(models []*ModelInfo) []*ModelInfo {
 //   - gemini-cli
 //   - aistudio
 //   - codex
-//   - kimi
-//   - antigravity
+//   - qwen
+//   - iflow
+//   - github-copilot
+//   - antigravity (returns static overrides only)
 func GetStaticModelDefinitionsByChannel(channel string) []*ModelInfo {
 	key := strings.ToLower(strings.TrimSpace(channel))
 	switch key {
@@ -181,9 +183,13 @@ func GetStaticModelDefinitionsByChannel(channel string) []*ModelInfo {
 	case "aistudio":
 		return GetAIStudioModels()
 	case "codex":
-		return GetCodexProModels()
-	case "kimi":
-		return GetKimiModels()
+		return GetOpenAIModels()
+	case "qwen":
+		return GetQwenModels()
+	case "iflow":
+		return GetIFlowModels()
+	case "github-copilot":
+		return GetGitHubCopilotModels()
 	case "antigravity":
 		return GetAntigravityModels()
 	default:
