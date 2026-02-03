@@ -167,6 +167,7 @@ func cloneModelInfos(models []*ModelInfo) []*ModelInfo {
 //   - codex
 //   - qwen
 //   - iflow
+//   - kiro
 //   - github-copilot
 //   - kiro
 //   - amazonq
@@ -190,6 +191,8 @@ func GetStaticModelDefinitionsByChannel(channel string) []*ModelInfo {
 		return GetQwenModels()
 	case "iflow":
 		return GetIFlowModels()
+	case "kiro":
+		return GetKiroModels()
 	case "github-copilot":
 		return GetGitHubCopilotModels()
 	case "kiro":
