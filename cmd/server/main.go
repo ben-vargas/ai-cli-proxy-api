@@ -75,6 +75,10 @@ func main() {
 	var codexLogin bool
 	var codexDeviceLogin bool
 	var claudeLogin bool
+	var qwenLogin bool
+	var kiloLogin bool
+	var iflowLogin bool
+	var iflowCookie bool
 	var noBrowser bool
 	var oauthCallbackPort int
 	var antigravityLogin bool
@@ -97,6 +101,10 @@ func main() {
 	flag.BoolVar(&codexLogin, "codex-login", false, "Login to Codex using OAuth")
 	flag.BoolVar(&codexDeviceLogin, "codex-device-login", false, "Login to Codex using device code flow")
 	flag.BoolVar(&claudeLogin, "claude-login", false, "Login to Claude using OAuth")
+	flag.BoolVar(&qwenLogin, "qwen-login", false, "Login to Qwen using OAuth")
+	flag.BoolVar(&kiloLogin, "kilo-login", false, "Login to Kilo AI using device flow")
+	flag.BoolVar(&iflowLogin, "iflow-login", false, "Login to iFlow using OAuth")
+	flag.BoolVar(&iflowCookie, "iflow-cookie", false, "Login to iFlow using Cookie")
 	flag.BoolVar(&noBrowser, "no-browser", false, "Don't open browser automatically for OAuth")
 	flag.BoolVar(&useIncognito, "incognito", false, "Open browser in incognito/private mode for OAuth (useful for multiple accounts)")
 	flag.BoolVar(&noIncognito, "no-incognito", false, "Force disable incognito mode (uses existing browser session)")
@@ -507,6 +515,8 @@ func main() {
 		cmd.DoClaudeLogin(cfg, options)
 	} else if qwenLogin {
 		cmd.DoQwenLogin(cfg, options)
+	} else if kiloLogin {
+		cmd.DoKiloLogin(cfg, options)
 	} else if iflowLogin {
 		cmd.DoIFlowLogin(cfg, options)
 	} else if iflowCookie {
