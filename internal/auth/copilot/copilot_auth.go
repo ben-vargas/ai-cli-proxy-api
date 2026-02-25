@@ -87,9 +87,14 @@ func (c *CopilotAuth) WaitForAuthorization(ctx context.Context, deviceCode *Devi
 		log.Warnf("copilot: failed to fetch user info: %v", err)
 	}
 
+	username := userInfo.Login
+	if username == "" {
+		username = "github-user"
+	}
+
 	return &CopilotAuthBundle{
 		TokenData: tokenData,
-		Username:  userInfo.Login,
+		Username:  username,
 		Email:     userInfo.Email,
 		Name:      userInfo.Name,
 	}, nil
