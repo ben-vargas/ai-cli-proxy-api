@@ -82,15 +82,21 @@ func (c *CopilotAuth) WaitForAuthorization(ctx context.Context, deviceCode *Devi
 	}
 
 	// Fetch the GitHub username
-	username, err := c.deviceClient.FetchUserInfo(ctx, tokenData.AccessToken)
+	userInfo, err := c.deviceClient.FetchUserInfo(ctx, tokenData.AccessToken)
 	if err != nil {
 		log.Warnf("copilot: failed to fetch user info: %v", err)
-		username = "unknown"
+	}
+
+	username := userInfo.Login
+	if username == "" {
+		username = "github-user"
 	}
 
 	return &CopilotAuthBundle{
 		TokenData: tokenData,
 		Username:  username,
+		Email:     userInfo.Email,
+		Name:      userInfo.Name,
 	}, nil
 }
 
@@ -150,12 +156,12 @@ func (c *CopilotAuth) ValidateToken(ctx context.Context, accessToken string) (bo
 		return false, "", nil
 	}
 
-	username, err := c.deviceClient.FetchUserInfo(ctx, accessToken)
+	userInfo, err := c.deviceClient.FetchUserInfo(ctx, accessToken)
 	if err != nil {
 		return false, "", err
 	}
 
-	return true, username, nil
+	return true, userInfo.Login, nil
 }
 
 // CreateTokenStorage creates a new CopilotTokenStorage from auth bundle.
@@ -165,6 +171,8 @@ func (c *CopilotAuth) CreateTokenStorage(bundle *CopilotAuthBundle) *CopilotToke
 		TokenType:   bundle.TokenData.TokenType,
 		Scope:       bundle.TokenData.Scope,
 		Username:    bundle.Username,
+		Email:       bundle.Email,
+		Name:        bundle.Name,
 		Type:        "github-copilot",
 	}
 }
