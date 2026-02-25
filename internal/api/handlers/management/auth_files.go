@@ -1974,7 +1974,7 @@ func (h *Handler) RequestGitHubToken(c *gin.Context) {
 			Type:        "github-copilot",
 		}
 
-		fileName := fmt.Sprintf("github-%s.json", username)
+		fileName := fmt.Sprintf("github-copilot-%s.json", username)
 		label := userInfo.Email
 		if label == "" {
 			label = username
