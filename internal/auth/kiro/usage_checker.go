@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
@@ -51,14 +50,12 @@ type QuotaStatus struct {
 // UsageChecker provides methods for checking token quota usage.
 type UsageChecker struct {
 	httpClient *http.Client
-	endpoint   string
 }
 
 // NewUsageChecker creates a new UsageChecker instance.
 func NewUsageChecker(cfg *config.Config) *UsageChecker {
 	return &UsageChecker{
 		httpClient: util.SetProxy(&cfg.SDKConfig, &http.Client{Timeout: 30 * time.Second}),
-		endpoint:   awsKiroEndpoint,
 	}
 }
 
@@ -66,7 +63,6 @@ func NewUsageChecker(cfg *config.Config) *UsageChecker {
 func NewUsageCheckerWithClient(client *http.Client) *UsageChecker {
 	return &UsageChecker{
 		httpClient: client,
-		endpoint:   awsKiroEndpoint,
 	}
 }
 
@@ -80,26 +76,23 @@ func (c *UsageChecker) CheckUsage(ctx context.Context, tokenData *KiroTokenData)
 		return nil, fmt.Errorf("access token is empty")
 	}
 
-	payload := map[string]interface{}{
+	queryParams := map[string]string{
 		"origin":       "AI_EDITOR",
 		"profileArn":   tokenData.ProfileArn,
 		"resourceType": "AGENTIC_REQUEST",
 	}
 
-	jsonBody, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
+	// Use endpoint from profileArn if available
+	endpoint := GetKiroAPIEndpointFromProfileArn(tokenData.ProfileArn)
+	url := buildURL(endpoint, pathGetUsageLimits, queryParams)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, strings.NewReader(string(jsonBody)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/x-amz-json-1.0")
-	req.Header.Set("x-amz-target", targetGetUsage)
-	req.Header.Set("Authorization", "Bearer "+tokenData.AccessToken)
-	req.Header.Set("Accept", "application/json")
+	accountKey := GetAccountKey(tokenData.ClientID, tokenData.RefreshToken)
+	setRuntimeHeaders(req, tokenData.AccessToken, accountKey)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
