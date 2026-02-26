@@ -19,15 +19,8 @@ import (
 )
 
 const (
-	// awsKiroEndpoint is used for CodeWhisperer management APIs (GetUsageLimits, ListProfiles, etc.)
-	// Note: This is different from the Amazon Q streaming endpoint (q.us-east-1.amazonaws.com)
-	// used in kiro_executor.go for GenerateAssistantResponse. Both endpoints are correct
-	// for their respective API operations.
-	awsKiroEndpoint     = "https://codewhisperer.us-east-1.amazonaws.com"
-	defaultTokenFile    = "~/.aws/sso/cache/kiro-auth-token.json"
-	targetGetUsage      = "AmazonCodeWhispererService.GetUsageLimits"
-	targetListModels    = "AmazonCodeWhispererService.ListAvailableModels"
-	targetGenerateChat  = "AmazonCodeWhispererStreamingService.GenerateAssistantResponse"
+	pathGetUsageLimits      = "getUsageLimits"
+	pathListAvailableModels = "ListAvailableModels"
 )
 
 // KiroAuth handles AWS CodeWhisperer authentication and API communication.
@@ -35,7 +28,6 @@ const (
 // and communicating with the CodeWhisperer API.
 type KiroAuth struct {
 	httpClient *http.Client
-	endpoint   string
 }
 
 // NewKiroAuth creates a new Kiro authentication service.
@@ -49,7 +41,6 @@ type KiroAuth struct {
 func NewKiroAuth(cfg *config.Config) *KiroAuth {
 	return &KiroAuth{
 		httpClient: util.SetProxy(&cfg.SDKConfig, &http.Client{Timeout: 120 * time.Second}),
-		endpoint:   awsKiroEndpoint,
 	}
 }
 
@@ -110,33 +101,30 @@ func (k *KiroAuth) IsTokenExpired(tokenData *KiroTokenData) bool {
 	return time.Now().After(expiresAt)
 }
 
-// makeRequest sends a request to the CodeWhisperer API.
-// This is an internal method for making authenticated API calls.
+// makeRequest sends a REST-style GET request to the CodeWhisperer API.
 //
 // Parameters:
 //   - ctx: The context for the request
-//   - target: The API target (e.g., "AmazonCodeWhispererService.GetUsageLimits")
-//   - accessToken: The OAuth access token
-//   - payload: The request payload
+//   - path: The API path (e.g., "getUsageLimits")
+//   - tokenData: The token data containing access token, refresh token, and profile ARN
+//   - queryParams: Query parameters to add to the URL
 //
 // Returns:
 //   - []byte: The response body
 //   - error: An error if the request fails
-func (k *KiroAuth) makeRequest(ctx context.Context, target string, accessToken string, payload interface{}) ([]byte, error) {
-	jsonBody, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
+func (k *KiroAuth) makeRequest(ctx context.Context, path string, tokenData *KiroTokenData, queryParams map[string]string) ([]byte, error) {
+	// Get endpoint from profileArn (defaults to us-east-1 if empty)
+	profileArn := queryParams["profileArn"]
+	endpoint := GetKiroAPIEndpointFromProfileArn(profileArn)
+	url := buildURL(endpoint, path, queryParams)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, k.endpoint, strings.NewReader(string(jsonBody)))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	req.Header.Set("Content-Type", "application/x-amz-json-1.0")
-	req.Header.Set("x-amz-target", target)
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Accept", "application/json")
+	accountKey := GetAccountKey(tokenData.ClientID, tokenData.RefreshToken)
+	setRuntimeHeaders(req, tokenData.AccessToken, accountKey)
 
 	resp, err := k.httpClient.Do(req)
 	if err != nil {
@@ -171,13 +159,13 @@ func (k *KiroAuth) makeRequest(ctx context.Context, target string, accessToken s
 //   - *KiroUsageInfo: The usage information
 //   - error: An error if the request fails
 func (k *KiroAuth) GetUsageLimits(ctx context.Context, tokenData *KiroTokenData) (*KiroUsageInfo, error) {
-	payload := map[string]interface{}{
+	queryParams := map[string]string{
 		"origin":       "AI_EDITOR",
 		"profileArn":   tokenData.ProfileArn,
 		"resourceType": "AGENTIC_REQUEST",
 	}
 
-	body, err := k.makeRequest(ctx, targetGetUsage, tokenData.AccessToken, payload)
+	body, err := k.makeRequest(ctx, pathGetUsageLimits, tokenData, queryParams)
 	if err != nil {
 		return nil, err
 	}
@@ -221,12 +209,12 @@ func (k *KiroAuth) GetUsageLimits(ctx context.Context, tokenData *KiroTokenData)
 //   - []*KiroModel: The list of available models
 //   - error: An error if the request fails
 func (k *KiroAuth) ListAvailableModels(ctx context.Context, tokenData *KiroTokenData) ([]*KiroModel, error) {
-	payload := map[string]interface{}{
+	queryParams := map[string]string{
 		"origin":     "AI_EDITOR",
 		"profileArn": tokenData.ProfileArn,
 	}
 
-	body, err := k.makeRequest(ctx, targetListModels, tokenData.AccessToken, payload)
+	body, err := k.makeRequest(ctx, pathListAvailableModels, tokenData, queryParams)
 	if err != nil {
 		return nil, err
 	}

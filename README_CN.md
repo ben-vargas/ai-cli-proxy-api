@@ -27,6 +27,51 @@
 
 ## Kiro 认证
 
+### 命令行登录
+
+> **注意：** 由于 AWS Cognito 限制，Google/GitHub 登录不可用于第三方应用。
+
+**AWS Builder ID**（推荐）：
+
+```bash
+# 设备码流程
+./CLIProxyAPI --kiro-aws-login
+
+# 授权码流程
+./CLIProxyAPI --kiro-aws-authcode
+```
+
+**从 Kiro IDE 导入令牌：**
+
+```bash
+./CLIProxyAPI --kiro-import
+```
+
+获取令牌步骤：
+
+1. 打开 Kiro IDE，使用 Google（或 GitHub）登录
+2. 找到令牌文件：`~/.kiro/kiro-auth-token.json`
+3. 运行：`./CLIProxyAPI --kiro-import`
+
+**AWS IAM Identity Center (IDC)：**
+
+```bash
+./CLIProxyAPI --kiro-idc-login --kiro-idc-start-url https://d-xxxxxxxxxx.awsapps.com/start
+
+# 指定区域
+./CLIProxyAPI --kiro-idc-login --kiro-idc-start-url https://d-xxxxxxxxxx.awsapps.com/start --kiro-idc-region us-west-2
+```
+
+**附加参数：**
+
+| 参数 | 说明 |
+|------|------|
+| `--no-browser` | 不自动打开浏览器，打印 URL |
+| `--no-incognito` | 使用已有浏览器会话（Kiro 默认使用无痕模式），适用于需要已登录浏览器会话的企业 SSO 场景 |
+| `--kiro-idc-start-url` | IDC Start URL（`--kiro-idc-login` 必需） |
+| `--kiro-idc-region` | IDC 区域（默认：`us-east-1`） |
+| `--kiro-idc-flow` | IDC 流程类型：`authcode`（默认）或 `device` |
+
 ### 网页端 OAuth 登录
 
 访问 Kiro OAuth 网页认证界面：

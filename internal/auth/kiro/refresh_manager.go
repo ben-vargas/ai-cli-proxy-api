@@ -10,14 +10,14 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// RefreshManager 是后台刷新器的单例管理器
+// RefreshManager is a singleton manager for background token refreshing.
 type RefreshManager struct {
 	mu               sync.Mutex
 	refresher        *BackgroundRefresher
 	ctx              context.Context
 	cancel           context.CancelFunc
 	started          bool
-	onTokenRefreshed func(tokenID string, tokenData *KiroTokenData) // 刷新成功回调
+	onTokenRefreshed func(tokenID string, tokenData *KiroTokenData)
 }
 
 var (
@@ -25,7 +25,7 @@ var (
 	managerOnce          sync.Once
 )
 
-// GetRefreshManager 获取全局刷新管理器实例
+// GetRefreshManager returns the global RefreshManager singleton.
 func GetRefreshManager() *RefreshManager {
 	managerOnce.Do(func() {
 		globalRefreshManager = &RefreshManager{}
@@ -33,9 +33,7 @@ func GetRefreshManager() *RefreshManager {
 	return globalRefreshManager
 }
 
-// Initialize 初始化后台刷新器
-// baseDir: token 文件所在的目录
-// cfg: 应用配置
+// Initialize sets up the background refresher.
 func (m *RefreshManager) Initialize(baseDir string, cfg *config.Config) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -58,18 +56,16 @@ func (m *RefreshManager) Initialize(baseDir string, cfg *config.Config) error {
 		baseDir = resolvedBaseDir
 	}
 
-	// 创建 token 存储库
 	repo := NewFileTokenRepository(baseDir)
 
-	// 创建后台刷新器，配置参数
 	opts := []RefresherOption{
-		WithInterval(time.Minute), // 每分钟检查一次
-		WithBatchSize(50),         // 每批最多处理 50 个 token
-		WithConcurrency(10),       // 最多 10 个并发刷新
-		WithConfig(cfg),           // 设置 OAuth 和 SSO 客户端
+		WithInterval(time.Minute),
+		WithBatchSize(50),
+		WithConcurrency(10),
+		WithConfig(cfg),
 	}
 
-	// 如果已设置回调，传递给 BackgroundRefresher
+	// Pass callback to BackgroundRefresher if already set
 	if m.onTokenRefreshed != nil {
 		opts = append(opts, WithOnTokenRefreshed(m.onTokenRefreshed))
 	}
@@ -80,7 +76,7 @@ func (m *RefreshManager) Initialize(baseDir string, cfg *config.Config) error {
 	return nil
 }
 
-// Start 启动后台刷新
+// Start begins background token refreshing.
 func (m *RefreshManager) Start() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -102,7 +98,7 @@ func (m *RefreshManager) Start() {
 	log.Info("refresh manager: background refresh started")
 }
 
-// Stop 停止后台刷新
+// Stop halts background token refreshing.
 func (m *RefreshManager) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -123,14 +119,14 @@ func (m *RefreshManager) Stop() {
 	log.Info("refresh manager: background refresh stopped")
 }
 
-// IsRunning 检查后台刷新是否正在运行
+// IsRunning reports whether background refreshing is active.
 func (m *RefreshManager) IsRunning() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.started
 }
 
-// UpdateBaseDir 更新 token 目录（用于运行时配置更改）
+// UpdateBaseDir changes the token directory at runtime.
 func (m *RefreshManager) UpdateBaseDir(baseDir string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -143,16 +139,15 @@ func (m *RefreshManager) UpdateBaseDir(baseDir string) {
 	}
 }
 
-// SetOnTokenRefreshed 设置 token 刷新成功后的回调函数
-// 可以在任何时候调用，支持运行时更新回调
-// callback: 回调函数，接收 tokenID（文件名）和新的 token 数据
+// SetOnTokenRefreshed registers a callback invoked after a successful token refresh.
+// Can be called at any time; supports runtime callback updates.
 func (m *RefreshManager) SetOnTokenRefreshed(callback func(tokenID string, tokenData *KiroTokenData)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	m.onTokenRefreshed = callback
 
-	// 如果 refresher 已经创建，使用并发安全的方式更新它的回调
+	// Update the refresher's callback in a thread-safe manner if already created
 	if m.refresher != nil {
 		m.refresher.callbackMu.Lock()
 		m.refresher.onTokenRefreshed = callback
@@ -162,8 +157,11 @@ func (m *RefreshManager) SetOnTokenRefreshed(callback func(tokenID string, token
 	log.Debug("refresh manager: token refresh callback registered")
 }
 
-// InitializeAndStart 初始化并启动后台刷新（便捷方法）
+// InitializeAndStart initializes and starts background refreshing (convenience method).
 func InitializeAndStart(baseDir string, cfg *config.Config) {
+	// Initialize global fingerprint config
+	initGlobalFingerprintConfig(cfg)
+
 	manager := GetRefreshManager()
 	if err := manager.Initialize(baseDir, cfg); err != nil {
 		log.Errorf("refresh manager: initialization failed: %v", err)
@@ -172,7 +170,31 @@ func InitializeAndStart(baseDir string, cfg *config.Config) {
 	manager.Start()
 }
 
-// StopGlobalRefreshManager 停止全局刷新管理器
+// initGlobalFingerprintConfig loads fingerprint settings from application config.
+func initGlobalFingerprintConfig(cfg *config.Config) {
+	if cfg == nil || cfg.KiroFingerprint == nil {
+		return
+	}
+	fpCfg := cfg.KiroFingerprint
+	SetGlobalFingerprintConfig(&FingerprintConfig{
+		OIDCSDKVersion:      fpCfg.OIDCSDKVersion,
+		RuntimeSDKVersion:   fpCfg.RuntimeSDKVersion,
+		StreamingSDKVersion: fpCfg.StreamingSDKVersion,
+		OSType:              fpCfg.OSType,
+		OSVersion:           fpCfg.OSVersion,
+		NodeVersion:         fpCfg.NodeVersion,
+		KiroVersion:         fpCfg.KiroVersion,
+		KiroHash:            fpCfg.KiroHash,
+	})
+	log.Debug("kiro: global fingerprint config loaded")
+}
+
+// InitFingerprintConfig initializes the global fingerprint config from application config.
+func InitFingerprintConfig(cfg *config.Config) {
+	initGlobalFingerprintConfig(cfg)
+}
+
+// StopGlobalRefreshManager stops the global refresh manager.
 func StopGlobalRefreshManager() {
 	if globalRefreshManager != nil {
 		globalRefreshManager.Stop()

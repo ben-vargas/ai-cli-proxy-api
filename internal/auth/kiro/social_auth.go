@@ -84,6 +84,8 @@ type SocialAuthClient struct {
 	httpClient      *http.Client
 	cfg             *config.Config
 	protocolHandler *ProtocolHandler
+	machineID       string
+	kiroVersion     string
 }
 
 // NewSocialAuthClient creates a new social auth client.
@@ -92,10 +94,13 @@ func NewSocialAuthClient(cfg *config.Config) *SocialAuthClient {
 	if cfg != nil {
 		client = util.SetProxy(&cfg.SDKConfig, client)
 	}
+	fp := GlobalFingerprintManager().GetFingerprint("login")
 	return &SocialAuthClient{
 		httpClient:      client,
 		cfg:             cfg,
 		protocolHandler: NewProtocolHandler(),
+		machineID:       fp.KiroHash,
+		kiroVersion:     fp.KiroVersion,
 	}
 }
 
@@ -229,7 +234,8 @@ func (c *SocialAuthClient) CreateToken(ctx context.Context, req *CreateTokenRequ
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("User-Agent", "KiroIDE-0.7.45-cli-proxy-api")
+	httpReq.Header.Set("User-Agent", fmt.Sprintf("KiroIDE-%s-%s", c.kiroVersion, c.machineID))
+	httpReq.Header.Set("Accept", "application/json, text/plain, */*")
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -269,7 +275,8 @@ func (c *SocialAuthClient) RefreshSocialToken(ctx context.Context, refreshToken 
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("User-Agent", "cli-proxy-api/1.0.0")
+	httpReq.Header.Set("User-Agent", fmt.Sprintf("KiroIDE-%s-%s", c.kiroVersion, c.machineID))
+	httpReq.Header.Set("Accept", "application/json, text/plain, */*")
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -466,7 +473,7 @@ func forceDefaultProtocolHandler() {
 	if runtime.GOOS != "linux" {
 		return // Non-Linux platforms use different handler mechanisms
 	}
-	
+
 	// Set our handler as default using xdg-mime
 	cmd := exec.Command("xdg-mime", "default", "kiro-oauth-handler.desktop", "x-scheme-handler/kiro")
 	if err := cmd.Run(); err != nil {

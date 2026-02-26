@@ -36,10 +36,12 @@ type KiroInferenceConfig struct {
 
 // KiroConversationState holds the conversation context
 type KiroConversationState struct {
-	ChatTriggerType string               `json:"chatTriggerType"` // Required: "MANUAL"
-	ConversationID  string               `json:"conversationId"`
-	CurrentMessage  KiroCurrentMessage   `json:"currentMessage"`
-	History         []KiroHistoryMessage `json:"history,omitempty"`
+	AgentContinuationID string               `json:"agentContinuationId,omitempty"`
+	AgentTaskType       string               `json:"agentTaskType,omitempty"`
+	ChatTriggerType     string               `json:"chatTriggerType"` // Required: "MANUAL"
+	ConversationID      string               `json:"conversationId"`
+	CurrentMessage      KiroCurrentMessage   `json:"currentMessage"`
+	History             []KiroHistoryMessage `json:"history,omitempty"`
 }
 
 // KiroCurrentMessage wraps the current user message
@@ -297,15 +299,28 @@ func BuildKiroPayloadFromOpenAI(openaiBody []byte, modelID, profileArn, origin s
 		}
 	}
 
+	// Session IDs: extract from messages[].additional_kwargs (LangChain format) or random
+	conversationID := extractMetadataFromMessages(messages, "conversationId")
+	continuationID := extractMetadataFromMessages(messages, "continuationId")
+	if conversationID == "" {
+		conversationID = uuid.New().String()
+	}
+
 	payload := KiroPayload{
 		ConversationState: KiroConversationState{
+			AgentTaskType:   "vibe",
 			ChatTriggerType: "MANUAL",
-			ConversationID:  uuid.New().String(),
+			ConversationID:  conversationID,
 			CurrentMessage:  currentMessage,
 			History:         history,
 		},
 		ProfileArn:      profileArn,
 		InferenceConfig: inferenceConfig,
+	}
+
+	// Only set AgentContinuationID if client provided
+	if continuationID != "" {
+		payload.ConversationState.AgentContinuationID = continuationID
 	}
 
 	result, err := json.Marshal(payload)
@@ -331,6 +346,18 @@ func normalizeOrigin(origin string) string {
 	default:
 		return origin
 	}
+}
+
+// extractMetadataFromMessages extracts metadata from messages[].additional_kwargs (LangChain format).
+// Searches from the last message backwards, returns empty string if not found.
+func extractMetadataFromMessages(messages gjson.Result, key string) string {
+	arr := messages.Array()
+	for i := len(arr) - 1; i >= 0; i-- {
+		if val := arr[i].Get("additional_kwargs." + key); val.Exists() && val.String() != "" {
+			return val.String()
+		}
+	}
+	return ""
 }
 
 // extractSystemPromptFromOpenAI extracts system prompt from OpenAI messages

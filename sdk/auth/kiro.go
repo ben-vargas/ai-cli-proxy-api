@@ -166,9 +166,21 @@ func (a *KiroAuthenticator) Login(ctx context.Context, cfg *config.Config, opts 
 		return nil, fmt.Errorf("kiro auth: configuration is required")
 	}
 
+	// Extract IDC options from metadata if present
+	var idcOpts *kiroauth.IDCLoginOptions
+	if opts != nil && opts.Metadata != nil {
+		if startURL := opts.Metadata["start-url"]; startURL != "" {
+			idcOpts = &kiroauth.IDCLoginOptions{
+				StartURL:      startURL,
+				Region:        opts.Metadata["region"],
+				UseDeviceCode: opts.Metadata["flow"] == "device",
+			}
+		}
+	}
+
 	// Use the unified method selection flow (Builder ID or IDC)
 	ssoClient := kiroauth.NewSSOOIDCClient(cfg)
-	tokenData, err := ssoClient.LoginWithMethodSelection(ctx)
+	tokenData, err := ssoClient.LoginWithMethodSelection(ctx, idcOpts)
 	if err != nil {
 		return nil, fmt.Errorf("login failed: %w", err)
 	}

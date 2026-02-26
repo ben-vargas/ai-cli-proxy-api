@@ -27,6 +27,51 @@ The Plus release stays in lockstep with the mainline features.
 
 ## Kiro Authentication
 
+### CLI Login
+
+> **Note:** Google/GitHub login is not available for third-party applications due to AWS Cognito restrictions.
+
+**AWS Builder ID** (recommended):
+
+```bash
+# Device code flow
+./CLIProxyAPI --kiro-aws-login
+
+# Authorization code flow
+./CLIProxyAPI --kiro-aws-authcode
+```
+
+**Import token from Kiro IDE:**
+
+```bash
+./CLIProxyAPI --kiro-import
+```
+
+To get a token from Kiro IDE:
+
+1. Open Kiro IDE and login with Google (or GitHub)
+2. Find the token file: `~/.kiro/kiro-auth-token.json`
+3. Run: `./CLIProxyAPI --kiro-import`
+
+**AWS IAM Identity Center (IDC):**
+
+```bash
+./CLIProxyAPI --kiro-idc-login --kiro-idc-start-url https://d-xxxxxxxxxx.awsapps.com/start
+
+# Specify region
+./CLIProxyAPI --kiro-idc-login --kiro-idc-start-url https://d-xxxxxxxxxx.awsapps.com/start --kiro-idc-region us-west-2
+```
+
+**Additional flags:**
+
+| Flag | Description |
+|------|-------------|
+| `--no-browser` | Don't open browser automatically, print URL instead |
+| `--no-incognito` | Use existing browser session (Kiro defaults to incognito). Useful for corporate SSO that requires an authenticated browser session |
+| `--kiro-idc-start-url` | IDC Start URL (required with `--kiro-idc-login`) |
+| `--kiro-idc-region` | IDC region (default: `us-east-1`) |
+| `--kiro-idc-flow` | IDC flow type: `authcode` (default) or `device` |
+
 ### Web-based OAuth Login
 
 Access the Kiro OAuth web interface at:
