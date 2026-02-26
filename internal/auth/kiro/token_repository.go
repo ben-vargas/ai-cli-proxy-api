@@ -200,36 +200,22 @@ func (r *FileTokenRepository) readTokenFile(path string) (*Token, error) {
 	}
 
 	// 解析各字段
-	if v, ok := metadata["access_token"].(string); ok {
-		token.AccessToken = v
-	}
-	if v, ok := metadata["refresh_token"].(string); ok {
-		token.RefreshToken = v
-	}
-	if v, ok := metadata["client_id"].(string); ok {
-		token.ClientID = v
-	}
-	if v, ok := metadata["client_secret"].(string); ok {
-		token.ClientSecret = v
-	}
-	if v, ok := metadata["region"].(string); ok {
-		token.Region = v
-	}
-	if v, ok := metadata["start_url"].(string); ok {
-		token.StartURL = v
-	}
-	if v, ok := metadata["provider"].(string); ok {
-		token.Provider = v
-	}
+	token.AccessToken, _ = metadata["access_token"].(string)
+	token.RefreshToken, _ = metadata["refresh_token"].(string)
+	token.ClientID, _ = metadata["client_id"].(string)
+	token.ClientSecret, _ = metadata["client_secret"].(string)
+	token.Region, _ = metadata["region"].(string)
+	token.StartURL, _ = metadata["start_url"].(string)
+	token.Provider, _ = metadata["provider"].(string)
 
 	// 解析时间字段
-	if v, ok := metadata["expires_at"].(string); ok {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
+	if expiresAtStr, ok := metadata["expires_at"].(string); ok && expiresAtStr != "" {
+		if t, err := time.Parse(time.RFC3339, expiresAtStr); err == nil {
 			token.ExpiresAt = t
 		}
 	}
-	if v, ok := metadata["last_refresh"].(string); ok {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
+	if lastRefreshStr, ok := metadata["last_refresh"].(string); ok && lastRefreshStr != "" {
+		if t, err := time.Parse(time.RFC3339, lastRefreshStr); err == nil {
 			token.LastVerified = t
 		}
 	}

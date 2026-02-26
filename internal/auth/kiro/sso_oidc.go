@@ -14,6 +14,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -40,21 +41,13 @@ const (
 	// Authorization code flow callback
 	authCodeCallbackPath = "/oauth/callback"
 	authCodeCallbackPort = 19877
-
-	// User-Agent to match official Kiro IDE
-	kiroUserAgent = "KiroIDE"
-
-	// IDC token refresh headers (matching Kiro IDE behavior)
-	idcAmzUserAgent = "aws-sdk-js/3.738.0 ua/2.1 os/other lang/js md/browser#unknown_unknown api/sso-oidc#3.738.0 m/E KiroIDE"
 )
 
-// Sentinel errors for OIDC token polling
 var (
 	ErrAuthorizationPending = errors.New("authorization_pending")
 	ErrSlowDown             = errors.New("slow_down")
 )
 
-// SSOOIDCClient handles AWS SSO OIDC authentication.
 type SSOOIDCClient struct {
 	httpClient *http.Client
 	cfg        *config.Config
@@ -74,10 +67,10 @@ func NewSSOOIDCClient(cfg *config.Config) *SSOOIDCClient {
 
 // RegisterClientResponse from AWS SSO OIDC.
 type RegisterClientResponse struct {
-	ClientID                string `json:"clientId"`
-	ClientSecret            string `json:"clientSecret"`
-	ClientIDIssuedAt        int64  `json:"clientIdIssuedAt"`
-	ClientSecretExpiresAt   int64  `json:"clientSecretExpiresAt"`
+	ClientID              string `json:"clientId"`
+	ClientSecret          string `json:"clientSecret"`
+	ClientIDIssuedAt      int64  `json:"clientIdIssuedAt"`
+	ClientSecretExpiresAt int64  `json:"clientSecretExpiresAt"`
 }
 
 // StartDeviceAuthResponse from AWS SSO OIDC.
@@ -174,8 +167,7 @@ func (c *SSOOIDCClient) RegisterClientWithRegion(ctx context.Context, region str
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", kiroUserAgent)
+	SetOIDCHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -220,8 +212,7 @@ func (c *SSOOIDCClient) StartDeviceAuthorizationWithIDC(ctx context.Context, cli
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", kiroUserAgent)
+	SetOIDCHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -267,8 +258,7 @@ func (c *SSOOIDCClient) CreateTokenWithRegion(ctx context.Context, clientID, cli
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", kiroUserAgent)
+	SetOIDCHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -311,8 +301,11 @@ func (c *SSOOIDCClient) CreateTokenWithRegion(ctx context.Context, clientID, cli
 	return &result, nil
 }
 
-// RefreshTokenWithRegion refreshes an access token using the refresh token with a specific region.
+// RefreshTokenWithRegion refreshes an access token using the refresh token with a specific OIDC region.
 func (c *SSOOIDCClient) RefreshTokenWithRegion(ctx context.Context, clientID, clientSecret, refreshToken, region, startURL string) (*KiroTokenData, error) {
+	if region == "" {
+		region = defaultIDCRegion
+	}
 	endpoint := getOIDCEndpoint(region)
 
 	payload := map[string]string{
@@ -331,18 +324,7 @@ func (c *SSOOIDCClient) RefreshTokenWithRegion(ctx context.Context, clientID, cl
 	if err != nil {
 		return nil, err
 	}
-
-	// Set headers matching kiro2api's IDC token refresh
-	// These headers are required for successful IDC token refresh
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Host", fmt.Sprintf("oidc.%s.amazonaws.com", region))
-	req.Header.Set("Connection", "keep-alive")
-	req.Header.Set("x-amz-user-agent", idcAmzUserAgent)
-	req.Header.Set("Accept", "*/*")
-	req.Header.Set("Accept-Language", "*")
-	req.Header.Set("sec-fetch-mode", "cors")
-	req.Header.Set("User-Agent", "node")
-	req.Header.Set("Accept-Encoding", "br, gzip, deflate")
+	SetOIDCHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -469,10 +451,10 @@ func (c *SSOOIDCClient) LoginWithIDC(ctx context.Context, startURL, region strin
 
 			// Step 5: Get profile ARN from CodeWhisperer API
 			fmt.Println("Fetching profile information...")
-			profileArn := c.fetchProfileArn(ctx, tokenResp.AccessToken)
+			profileArn := c.FetchProfileArn(ctx, tokenResp.AccessToken, regResp.ClientID, tokenResp.RefreshToken)
 
 			// Fetch user email
-			email := FetchUserEmailWithFallback(ctx, c.cfg, tokenResp.AccessToken)
+			email := FetchUserEmailWithFallback(ctx, c.cfg, tokenResp.AccessToken, regResp.ClientID, tokenResp.RefreshToken)
 			if email != "" {
 				fmt.Printf("  Logged in as: %s\n", email)
 			}
@@ -502,11 +484,35 @@ func (c *SSOOIDCClient) LoginWithIDC(ctx context.Context, startURL, region strin
 	return nil, fmt.Errorf("authorization timed out")
 }
 
+// IDCLoginOptions holds optional parameters for IDC login.
+type IDCLoginOptions struct {
+	StartURL      string // Pre-configured start URL (skips prompt if set)
+	Region        string // OIDC region for login and token refresh (defaults to us-east-1)
+	UseDeviceCode bool   // Use Device Code flow instead of Auth Code flow
+}
+
 // LoginWithMethodSelection prompts the user to select between Builder ID and IDC, then performs the login.
-func (c *SSOOIDCClient) LoginWithMethodSelection(ctx context.Context) (*KiroTokenData, error) {
+// Options can be provided to pre-configure IDC parameters (startURL, region).
+// If StartURL is provided in opts, IDC flow is used directly without prompting.
+func (c *SSOOIDCClient) LoginWithMethodSelection(ctx context.Context, opts *IDCLoginOptions) (*KiroTokenData, error) {
 	fmt.Println("\n╔══════════════════════════════════════════════════════════╗")
 	fmt.Println("║              Kiro Authentication (AWS)                    ║")
 	fmt.Println("╚══════════════════════════════════════════════════════════╝")
+
+	// If IDC options with StartURL are provided, skip method selection and use IDC directly
+	if opts != nil && opts.StartURL != "" {
+		region := opts.Region
+		if region == "" {
+			region = defaultIDCRegion
+		}
+		fmt.Printf("\n  Using IDC with Start URL: %s\n", opts.StartURL)
+		fmt.Printf("  Region: %s\n", region)
+
+		if opts.UseDeviceCode {
+			return c.LoginWithIDCAndOptions(ctx, opts.StartURL, region)
+		}
+		return c.LoginWithIDCAuthCode(ctx, opts.StartURL, region)
+	}
 
 	// Prompt for login method
 	options := []string{
@@ -520,15 +526,41 @@ func (c *SSOOIDCClient) LoginWithMethodSelection(ctx context.Context) (*KiroToke
 		return c.LoginWithBuilderID(ctx)
 	}
 
-	// IDC flow - prompt for start URL and region
-	fmt.Println()
-	startURL := promptInput("? Enter Start URL", "")
-	if startURL == "" {
-		return nil, fmt.Errorf("start URL is required for IDC login")
+	// IDC flow - use pre-configured values or prompt
+	var startURL, region string
+
+	if opts != nil {
+		startURL = opts.StartURL
+		region = opts.Region
 	}
 
-	region := promptInput("? Enter Region", defaultIDCRegion)
+	fmt.Println()
 
+	// Use pre-configured startURL or prompt
+	if startURL == "" {
+		startURL = promptInput("? Enter Start URL", "")
+		if startURL == "" {
+			return nil, fmt.Errorf("start URL is required for IDC login")
+		}
+	} else {
+		fmt.Printf("  Using pre-configured Start URL: %s\n", startURL)
+	}
+
+	// Use pre-configured region or prompt
+	if region == "" {
+		region = promptInput("? Enter Region", defaultIDCRegion)
+	} else {
+		fmt.Printf("  Using pre-configured Region: %s\n", region)
+	}
+
+	if opts != nil && opts.UseDeviceCode {
+		return c.LoginWithIDCAndOptions(ctx, startURL, region)
+	}
+	return c.LoginWithIDCAuthCode(ctx, startURL, region)
+}
+
+// LoginWithIDCAndOptions performs IDC login with the specified region.
+func (c *SSOOIDCClient) LoginWithIDCAndOptions(ctx context.Context, startURL, region string) (*KiroTokenData, error) {
 	return c.LoginWithIDC(ctx, startURL, region)
 }
 
@@ -550,8 +582,7 @@ func (c *SSOOIDCClient) RegisterClient(ctx context.Context) (*RegisterClientResp
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", kiroUserAgent)
+	SetOIDCHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -594,8 +625,7 @@ func (c *SSOOIDCClient) StartDeviceAuthorization(ctx context.Context, clientID, 
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", kiroUserAgent)
+	SetOIDCHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -639,8 +669,7 @@ func (c *SSOOIDCClient) CreateToken(ctx context.Context, clientID, clientSecret,
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", kiroUserAgent)
+	SetOIDCHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -702,13 +731,7 @@ func (c *SSOOIDCClient) RefreshToken(ctx context.Context, clientID, clientSecret
 	if err != nil {
 		return nil, err
 	}
-
-	// Set headers matching Kiro IDE behavior for better compatibility
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Host", "oidc.us-east-1.amazonaws.com")
-	req.Header.Set("x-amz-user-agent", idcAmzUserAgent)
-	req.Header.Set("User-Agent", "node")
-	req.Header.Set("Accept", "*/*")
+	SetOIDCHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -835,12 +858,8 @@ func (c *SSOOIDCClient) LoginWithBuilderID(ctx context.Context) (*KiroTokenData,
 				log.Debugf("Failed to close browser: %v", err)
 			}
 
-			// Step 5: Get profile ARN from CodeWhisperer API
-			fmt.Println("Fetching profile information...")
-			profileArn := c.fetchProfileArn(ctx, tokenResp.AccessToken)
-
 			// Fetch user email (tries CodeWhisperer API first, then userinfo endpoint, then JWT parsing)
-			email := FetchUserEmailWithFallback(ctx, c.cfg, tokenResp.AccessToken)
+			email := FetchUserEmailWithFallback(ctx, c.cfg, tokenResp.AccessToken, regResp.ClientID, tokenResp.RefreshToken)
 			if email != "" {
 				fmt.Printf("  Logged in as: %s\n", email)
 			}
@@ -850,7 +869,7 @@ func (c *SSOOIDCClient) LoginWithBuilderID(ctx context.Context) (*KiroTokenData,
 			return &KiroTokenData{
 				AccessToken:  tokenResp.AccessToken,
 				RefreshToken: tokenResp.RefreshToken,
-				ProfileArn:   profileArn,
+				ProfileArn:   "", // Builder ID has no profile
 				ExpiresAt:    expiresAt.Format(time.RFC3339),
 				AuthMethod:   "builder-id",
 				Provider:     "AWS",
@@ -859,15 +878,15 @@ func (c *SSOOIDCClient) LoginWithBuilderID(ctx context.Context) (*KiroTokenData,
 				Email:        email,
 				Region:       defaultIDCRegion,
 			}, nil
-			}
-			}
+		}
+	}
 
-			// Close browser on timeout for better UX
-			if err := browser.CloseBrowser(); err != nil {
-			log.Debugf("Failed to close browser on timeout: %v", err)
-			}
-			return nil, fmt.Errorf("authorization timed out")
-			}
+	// Close browser on timeout for better UX
+	if err := browser.CloseBrowser(); err != nil {
+		log.Debugf("Failed to close browser on timeout: %v", err)
+	}
+	return nil, fmt.Errorf("authorization timed out")
+}
 
 // FetchUserEmail retrieves the user's email from AWS SSO OIDC userinfo endpoint.
 // Falls back to JWT parsing if userinfo fails.
@@ -931,20 +950,64 @@ func (c *SSOOIDCClient) tryUserInfoEndpoint(ctx context.Context, accessToken str
 	return ""
 }
 
-// fetchProfileArn retrieves the profile ARN from CodeWhisperer API.
-// This is needed for file naming since AWS SSO OIDC doesn't return profile info.
-func (c *SSOOIDCClient) fetchProfileArn(ctx context.Context, accessToken string) string {
-	// Try ListProfiles API first
-	profileArn := c.tryListProfiles(ctx, accessToken)
+// FetchProfileArn fetches the profile ARN from ListAvailableProfiles API.
+// This is used to get profileArn for imported accounts that may not have it.
+func (c *SSOOIDCClient) FetchProfileArn(ctx context.Context, accessToken, clientID, refreshToken string) string {
+	profileArn := c.tryListAvailableProfiles(ctx, accessToken, clientID, refreshToken)
 	if profileArn != "" {
 		return profileArn
 	}
-
-	// Fallback: Try ListAvailableCustomizations
-	return c.tryListCustomizations(ctx, accessToken)
+	return c.tryListProfilesLegacy(ctx, accessToken)
 }
 
-func (c *SSOOIDCClient) tryListProfiles(ctx context.Context, accessToken string) string {
+func (c *SSOOIDCClient) tryListAvailableProfiles(ctx context.Context, accessToken, clientID, refreshToken string) string {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, GetKiroAPIEndpoint("")+"/ListAvailableProfiles", strings.NewReader("{}"))
+	if err != nil {
+		return ""
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	accountKey := GetAccountKey(clientID, refreshToken)
+	setRuntimeHeaders(req, accessToken, accountKey)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		log.Debugf("ListAvailableProfiles request failed: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		log.Debugf("ListAvailableProfiles failed (status %d): %s", resp.StatusCode, string(respBody))
+		return ""
+	}
+
+	log.Debugf("ListAvailableProfiles response: %s", string(respBody))
+
+	var result struct {
+		Profiles []struct {
+			Arn         string `json:"arn"`
+			ProfileName string `json:"profileName"`
+		} `json:"profiles"`
+		NextToken *string `json:"nextToken"`
+	}
+
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		log.Debugf("ListAvailableProfiles parse error: %v", err)
+		return ""
+	}
+
+	if len(result.Profiles) > 0 {
+		log.Debugf("Found profile: %s (%s)", result.Profiles[0].ProfileName, result.Profiles[0].Arn)
+		return result.Profiles[0].Arn
+	}
+
+	return ""
+}
+
+func (c *SSOOIDCClient) tryListProfilesLegacy(ctx context.Context, accessToken string) string {
 	payload := map[string]interface{}{
 		"origin": "AI_EDITOR",
 	}
@@ -954,7 +1017,9 @@ func (c *SSOOIDCClient) tryListProfiles(ctx context.Context, accessToken string)
 		return ""
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://codewhisperer.us-east-1.amazonaws.com", strings.NewReader(string(body)))
+	// Use the legacy CodeWhisperer endpoint for JSON-RPC style requests.
+	// The Q endpoint (q.{region}.amazonaws.com) does NOT support x-amz-target headers.
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, GetCodeWhispererLegacyEndpoint(""), strings.NewReader(string(body)))
 	if err != nil {
 		return ""
 	}
@@ -973,11 +1038,11 @@ func (c *SSOOIDCClient) tryListProfiles(ctx context.Context, accessToken string)
 	respBody, _ := io.ReadAll(resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		log.Debugf("ListProfiles failed (status %d): %s", resp.StatusCode, string(respBody))
+		log.Debugf("ListProfiles (legacy) failed (status %d): %s", resp.StatusCode, string(respBody))
 		return ""
 	}
 
-	log.Debugf("ListProfiles response: %s", string(respBody))
+	log.Debugf("ListProfiles (legacy) response: %s", string(respBody))
 
 	var result struct {
 		Profiles []struct {
@@ -996,63 +1061,6 @@ func (c *SSOOIDCClient) tryListProfiles(ctx context.Context, accessToken string)
 
 	if len(result.Profiles) > 0 {
 		return result.Profiles[0].Arn
-	}
-
-	return ""
-}
-
-func (c *SSOOIDCClient) tryListCustomizations(ctx context.Context, accessToken string) string {
-	payload := map[string]interface{}{
-		"origin": "AI_EDITOR",
-	}
-
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return ""
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://codewhisperer.us-east-1.amazonaws.com", strings.NewReader(string(body)))
-	if err != nil {
-		return ""
-	}
-
-	req.Header.Set("Content-Type", "application/x-amz-json-1.0")
-	req.Header.Set("x-amz-target", "AmazonCodeWhispererService.ListAvailableCustomizations")
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Accept", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != http.StatusOK {
-		log.Debugf("ListAvailableCustomizations failed (status %d): %s", resp.StatusCode, string(respBody))
-		return ""
-	}
-
-	log.Debugf("ListAvailableCustomizations response: %s", string(respBody))
-
-	var result struct {
-		Customizations []struct {
-			Arn string `json:"arn"`
-		} `json:"customizations"`
-		ProfileArn string `json:"profileArn"`
-	}
-
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return ""
-	}
-
-	if result.ProfileArn != "" {
-		return result.ProfileArn
-	}
-
-	if len(result.Customizations) > 0 {
-		return result.Customizations[0].Arn
 	}
 
 	return ""
@@ -1078,8 +1086,7 @@ func (c *SSOOIDCClient) RegisterClientForAuthCode(ctx context.Context, redirectU
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", kiroUserAgent)
+	SetOIDCHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -1094,6 +1101,53 @@ func (c *SSOOIDCClient) RegisterClientForAuthCode(ctx context.Context, redirectU
 
 	if resp.StatusCode != http.StatusOK {
 		log.Debugf("register client for auth code failed (status %d): %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("register client failed (status %d)", resp.StatusCode)
+	}
+
+	var result RegisterClientResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func (c *SSOOIDCClient) RegisterClientForAuthCodeWithIDC(ctx context.Context, redirectURI, issuerUrl, region string) (*RegisterClientResponse, error) {
+	endpoint := getOIDCEndpoint(region)
+
+	payload := map[string]interface{}{
+		"clientName":   "Kiro IDE",
+		"clientType":   "public",
+		"scopes":       []string{"codewhisperer:completions", "codewhisperer:analysis", "codewhisperer:conversations", "codewhisperer:transformations", "codewhisperer:taskassist"},
+		"grantTypes":   []string{"authorization_code", "refresh_token"},
+		"redirectUris": []string{redirectURI},
+		"issuerUrl":    issuerUrl,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/client/register", strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+	SetOIDCHeaders(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		log.Debugf("register client for auth code with IDC failed (status %d): %s", resp.StatusCode, string(respBody))
 		return nil, fmt.Errorf("register client failed (status %d)", resp.StatusCode)
 	}
 
@@ -1128,6 +1182,7 @@ func (c *SSOOIDCClient) startAuthCodeCallbackServer(ctx context.Context, expecte
 	port := listener.Addr().(*net.TCPAddr).Port
 	redirectURI := fmt.Sprintf("http://127.0.0.1:%d%s", port, authCodeCallbackPath)
 	resultChan := make(chan AuthCodeCallbackResult, 1)
+	doneChan := make(chan struct{})
 
 	server := &http.Server{
 		ReadHeaderTimeout: 10 * time.Second,
@@ -1147,6 +1202,7 @@ func (c *SSOOIDCClient) startAuthCodeCallbackServer(ctx context.Context, expecte
 <html><head><title>Login Failed</title></head>
 <body><h1>Login Failed</h1><p>Error: %s</p><p>You can close this window.</p></body></html>`, html.EscapeString(errParam))
 			resultChan <- AuthCodeCallbackResult{Error: errParam}
+			close(doneChan)
 			return
 		}
 
@@ -1156,6 +1212,7 @@ func (c *SSOOIDCClient) startAuthCodeCallbackServer(ctx context.Context, expecte
 <html><head><title>Login Failed</title></head>
 <body><h1>Login Failed</h1><p>Invalid state parameter</p><p>You can close this window.</p></body></html>`)
 			resultChan <- AuthCodeCallbackResult{Error: "state mismatch"}
+			close(doneChan)
 			return
 		}
 
@@ -1164,6 +1221,7 @@ func (c *SSOOIDCClient) startAuthCodeCallbackServer(ctx context.Context, expecte
 <body><h1>Login Successful!</h1><p>You can close this window and return to the terminal.</p>
 <script>window.close();</script></body></html>`)
 		resultChan <- AuthCodeCallbackResult{Code: code, State: state}
+		close(doneChan)
 	})
 
 	server.Handler = mux
@@ -1178,7 +1236,7 @@ func (c *SSOOIDCClient) startAuthCodeCallbackServer(ctx context.Context, expecte
 		select {
 		case <-ctx.Done():
 		case <-time.After(10 * time.Minute):
-		case <-resultChan:
+		case <-doneChan:
 		}
 		_ = server.Shutdown(context.Background())
 	}()
@@ -1227,8 +1285,54 @@ func (c *SSOOIDCClient) CreateTokenWithAuthCode(ctx context.Context, clientID, c
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", kiroUserAgent)
+	SetOIDCHeaders(req)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		log.Debugf("create token with auth code failed (status %d): %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("create token failed (status %d)", resp.StatusCode)
+	}
+
+	var result CreateTokenResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func (c *SSOOIDCClient) CreateTokenWithAuthCodeAndRegion(ctx context.Context, clientID, clientSecret, code, codeVerifier, redirectURI, region string) (*CreateTokenResponse, error) {
+	endpoint := getOIDCEndpoint(region)
+
+	payload := map[string]string{
+		"clientId":     clientID,
+		"clientSecret": clientSecret,
+		"code":         code,
+		"codeVerifier": codeVerifier,
+		"redirectUri":  redirectURI,
+		"grantType":    "authorization_code",
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/token", strings.NewReader(string(body)))
+	if err != nil {
+		return nil, err
+	}
+	SetOIDCHeaders(req)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -1352,12 +1456,118 @@ func (c *SSOOIDCClient) LoginWithBuilderIDAuthCode(ctx context.Context) (*KiroTo
 
 		fmt.Println("\n✓ Authentication successful!")
 
-		// Step 8: Get profile ARN
-		fmt.Println("Fetching profile information...")
-		profileArn := c.fetchProfileArn(ctx, tokenResp.AccessToken)
-
 		// Fetch user email (tries CodeWhisperer API first, then userinfo endpoint, then JWT parsing)
-		email := FetchUserEmailWithFallback(ctx, c.cfg, tokenResp.AccessToken)
+		email := FetchUserEmailWithFallback(ctx, c.cfg, tokenResp.AccessToken, regResp.ClientID, tokenResp.RefreshToken)
+		if email != "" {
+			fmt.Printf("  Logged in as: %s\n", email)
+		}
+
+		expiresAt := time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
+
+		return &KiroTokenData{
+			AccessToken:  tokenResp.AccessToken,
+			RefreshToken: tokenResp.RefreshToken,
+			ProfileArn:   "", // Builder ID has no profile
+			ExpiresAt:    expiresAt.Format(time.RFC3339),
+			AuthMethod:   "builder-id",
+			Provider:     "AWS",
+			ClientID:     regResp.ClientID,
+			ClientSecret: regResp.ClientSecret,
+			Email:        email,
+			Region:       defaultIDCRegion,
+		}, nil
+	}
+}
+
+func (c *SSOOIDCClient) LoginWithIDCAuthCode(ctx context.Context, startURL, region string) (*KiroTokenData, error) {
+	fmt.Println("\n╔══════════════════════════════════════════════════════════╗")
+	fmt.Println("║     Kiro Authentication (AWS IDC - Auth Code)             ║")
+	fmt.Println("╚══════════════════════════════════════════════════════════╝")
+
+	if region == "" {
+		region = defaultIDCRegion
+	}
+
+	codeVerifier, codeChallenge, err := generatePKCEForAuthCode()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate PKCE: %w", err)
+	}
+
+	state, err := generateStateForAuthCode()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate state: %w", err)
+	}
+
+	fmt.Println("\nStarting callback server...")
+	redirectURI, resultChan, err := c.startAuthCodeCallbackServer(ctx, state)
+	if err != nil {
+		return nil, fmt.Errorf("failed to start callback server: %w", err)
+	}
+	log.Debugf("Callback server started, redirect URI: %s", redirectURI)
+
+	fmt.Println("Registering client...")
+	regResp, err := c.RegisterClientForAuthCodeWithIDC(ctx, redirectURI, startURL, region)
+	if err != nil {
+		return nil, fmt.Errorf("failed to register client: %w", err)
+	}
+	log.Debugf("Client registered: %s", regResp.ClientID)
+
+	endpoint := getOIDCEndpoint(region)
+	scopes := "codewhisperer:completions,codewhisperer:analysis,codewhisperer:conversations,codewhisperer:transformations,codewhisperer:taskassist"
+	authURL := buildAuthorizationURL(endpoint, regResp.ClientID, redirectURI, scopes, state, codeChallenge)
+
+	fmt.Println("\n════════════════════════════════════════════════════════════")
+	fmt.Println("  Opening browser for authentication...")
+	fmt.Println("════════════════════════════════════════════════════════════")
+	fmt.Printf("\n  URL: %s\n\n", authURL)
+
+	if c.cfg != nil {
+		browser.SetIncognitoMode(c.cfg.IncognitoBrowser)
+	} else {
+		browser.SetIncognitoMode(true)
+	}
+
+	if err := browser.OpenURL(authURL); err != nil {
+		log.Warnf("Could not open browser automatically: %v", err)
+		fmt.Println("  ⚠ Could not open browser automatically.")
+		fmt.Println("  Please open the URL above in your browser manually.")
+	} else {
+		fmt.Println("  (Browser opened automatically)")
+	}
+
+	fmt.Println("\n  Waiting for authorization callback...")
+
+	select {
+	case <-ctx.Done():
+		browser.CloseBrowser()
+		return nil, ctx.Err()
+	case <-time.After(10 * time.Minute):
+		browser.CloseBrowser()
+		return nil, fmt.Errorf("authorization timed out")
+	case result := <-resultChan:
+		if result.Error != "" {
+			browser.CloseBrowser()
+			return nil, fmt.Errorf("authorization failed: %s", result.Error)
+		}
+
+		fmt.Println("\n✓ Authorization received!")
+
+		if err := browser.CloseBrowser(); err != nil {
+			log.Debugf("Failed to close browser: %v", err)
+		}
+
+		fmt.Println("Exchanging code for tokens...")
+		tokenResp, err := c.CreateTokenWithAuthCodeAndRegion(ctx, regResp.ClientID, regResp.ClientSecret, result.Code, codeVerifier, redirectURI, region)
+		if err != nil {
+			return nil, fmt.Errorf("failed to exchange code for tokens: %w", err)
+		}
+
+		fmt.Println("\n✓ Authentication successful!")
+
+		fmt.Println("Fetching profile information...")
+		profileArn := c.FetchProfileArn(ctx, tokenResp.AccessToken, regResp.ClientID, tokenResp.RefreshToken)
+
+		email := FetchUserEmailWithFallback(ctx, c.cfg, tokenResp.AccessToken, regResp.ClientID, tokenResp.RefreshToken)
 		if email != "" {
 			fmt.Printf("  Logged in as: %s\n", email)
 		}
@@ -1369,12 +1579,25 @@ func (c *SSOOIDCClient) LoginWithBuilderIDAuthCode(ctx context.Context) (*KiroTo
 			RefreshToken: tokenResp.RefreshToken,
 			ProfileArn:   profileArn,
 			ExpiresAt:    expiresAt.Format(time.RFC3339),
-			AuthMethod:   "builder-id",
+			AuthMethod:   "idc",
 			Provider:     "AWS",
 			ClientID:     regResp.ClientID,
 			ClientSecret: regResp.ClientSecret,
 			Email:        email,
-			Region:       defaultIDCRegion,
+			StartURL:     startURL,
+			Region:       region,
 		}, nil
 	}
+}
+
+func buildAuthorizationURL(endpoint, clientID, redirectURI, scopes, state, codeChallenge string) string {
+	params := url.Values{}
+	params.Set("response_type", "code")
+	params.Set("client_id", clientID)
+	params.Set("redirect_uri", redirectURI)
+	params.Set("scopes", scopes)
+	params.Set("state", state)
+	params.Set("code_challenge", codeChallenge)
+	params.Set("code_challenge_method", "S256")
+	return fmt.Sprintf("%s/authorize?%s", endpoint, params.Encode())
 }

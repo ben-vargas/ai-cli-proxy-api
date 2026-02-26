@@ -23,10 +23,10 @@ import (
 const (
 	// Kiro auth endpoint
 	kiroAuthEndpoint = "https://prod.us-east-1.auth.desktop.kiro.dev"
-	
+
 	// Default callback port
 	defaultCallbackPort = 9876
-	
+
 	// Auth timeout
 	authTimeout = 10 * time.Minute
 )
@@ -41,8 +41,10 @@ type KiroTokenResponse struct {
 
 // KiroOAuth handles the OAuth flow for Kiro authentication.
 type KiroOAuth struct {
-	httpClient *http.Client
-	cfg        *config.Config
+	httpClient  *http.Client
+	cfg         *config.Config
+	machineID   string
+	kiroVersion string
 }
 
 // NewKiroOAuth creates a new Kiro OAuth handler.
@@ -51,9 +53,12 @@ func NewKiroOAuth(cfg *config.Config) *KiroOAuth {
 	if cfg != nil {
 		client = util.SetProxy(&cfg.SDKConfig, client)
 	}
+	fp := GlobalFingerprintManager().GetFingerprint("login")
 	return &KiroOAuth{
-		httpClient: client,
-		cfg:        cfg,
+		httpClient:  client,
+		cfg:         cfg,
+		machineID:   fp.KiroHash,
+		kiroVersion: fp.KiroVersion,
 	}
 }
 
@@ -190,7 +195,8 @@ func (o *KiroOAuth) exchangeCodeForToken(ctx context.Context, code, codeVerifier
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "KiroIDE-0.7.45-cli-proxy-api")
+	req.Header.Set("User-Agent", fmt.Sprintf("KiroIDE-%s-%s", o.kiroVersion, o.machineID))
+	req.Header.Set("Accept", "application/json, text/plain, */*")
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
@@ -256,11 +262,8 @@ func (o *KiroOAuth) RefreshTokenWithFingerprint(ctx context.Context, refreshToke
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-
-	// Use KiroIDE-style User-Agent to match official Kiro IDE behavior
-	// This helps avoid 403 errors from server-side User-Agent validation
-	userAgent := buildKiroUserAgent(tokenKey)
-	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("User-Agent", fmt.Sprintf("KiroIDE-%s-%s", o.kiroVersion, o.machineID))
+	req.Header.Set("Accept", "application/json, text/plain, */*")
 
 	resp, err := o.httpClient.Do(req)
 	if err != nil {
@@ -299,19 +302,6 @@ func (o *KiroOAuth) RefreshTokenWithFingerprint(ctx context.Context, refreshToke
 		Provider:     "", // Caller should preserve original provider
 		Region:       "us-east-1",
 	}, nil
-}
-
-// buildKiroUserAgent builds a KiroIDE-style User-Agent string.
-// If tokenKey is provided, uses fingerprint manager for consistent fingerprint.
-// Otherwise generates a simple KiroIDE User-Agent.
-func buildKiroUserAgent(tokenKey string) string {
-	if tokenKey != "" {
-		fm := NewFingerprintManager()
-		fp := fm.GetFingerprint(tokenKey)
-		return fmt.Sprintf("KiroIDE-%s-%s", fp.KiroVersion, fp.KiroHash[:16])
-	}
-	// Default KiroIDE User-Agent matching kiro-openai-gateway format
-	return "KiroIDE-0.7.45-cli-proxy-api"
 }
 
 // LoginWithGoogle performs OAuth login with Google using Kiro's social auth.

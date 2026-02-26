@@ -206,3 +206,52 @@ func DoKiroImport(cfg *config.Config, options *LoginOptions) {
 	}
 	fmt.Println("Kiro token import successful!")
 }
+
+func DoKiroIDCLogin(cfg *config.Config, options *LoginOptions, startURL, region, flow string) {
+	if options == nil {
+		options = &LoginOptions{}
+	}
+
+	if startURL == "" {
+		log.Errorf("Kiro IDC login requires --kiro-idc-start-url")
+		fmt.Println("\nUsage: --kiro-idc-login --kiro-idc-start-url https://d-xxx.awsapps.com/start")
+		return
+	}
+
+	manager := newAuthManager()
+
+	authenticator := sdkAuth.NewKiroAuthenticator()
+	metadata := map[string]string{
+		"start-url": startURL,
+		"region":    region,
+		"flow":      flow,
+	}
+
+	record, err := authenticator.Login(context.Background(), cfg, &sdkAuth.LoginOptions{
+		NoBrowser: options.NoBrowser,
+		Metadata:  metadata,
+		Prompt:    options.Prompt,
+	})
+	if err != nil {
+		log.Errorf("Kiro IDC authentication failed: %v", err)
+		fmt.Println("\nTroubleshooting:")
+		fmt.Println("1. Make sure your IDC Start URL is correct")
+		fmt.Println("2. Complete the authorization in the browser")
+		fmt.Println("3. If auth code flow fails, try: --kiro-idc-flow device")
+		return
+	}
+
+	savedPath, err := manager.SaveAuth(record, cfg)
+	if err != nil {
+		log.Errorf("Failed to save auth: %v", err)
+		return
+	}
+
+	if savedPath != "" {
+		fmt.Printf("Authentication saved to %s\n", savedPath)
+	}
+	if record != nil && record.Label != "" {
+		fmt.Printf("Authenticated as %s\n", record.Label)
+	}
+	fmt.Println("Kiro IDC authentication successful!")
+}
