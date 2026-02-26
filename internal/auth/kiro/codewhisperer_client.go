@@ -9,30 +9,23 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	log "github.com/sirupsen/logrus"
 )
 
-const (
-	codeWhispererAPI = "https://codewhisperer.us-east-1.amazonaws.com"
-	kiroVersion      = "0.6.18"
-)
-
 // CodeWhispererClient handles CodeWhisperer API calls.
 type CodeWhispererClient struct {
 	httpClient *http.Client
-	machineID  string
 }
 
 // UsageLimitsResponse represents the getUsageLimits API response.
 type UsageLimitsResponse struct {
-	DaysUntilReset     *int                `json:"daysUntilReset,omitempty"`
-	NextDateReset      *float64            `json:"nextDateReset,omitempty"`
-	UserInfo           *UserInfo           `json:"userInfo,omitempty"`
-	SubscriptionInfo   *SubscriptionInfo   `json:"subscriptionInfo,omitempty"`
-	UsageBreakdownList []UsageBreakdown    `json:"usageBreakdownList,omitempty"`
+	DaysUntilReset     *int              `json:"daysUntilReset,omitempty"`
+	NextDateReset      *float64          `json:"nextDateReset,omitempty"`
+	UserInfo           *UserInfo         `json:"userInfo,omitempty"`
+	SubscriptionInfo   *SubscriptionInfo `json:"subscriptionInfo,omitempty"`
+	UsageBreakdownList []UsageBreakdown  `json:"usageBreakdownList,omitempty"`
 }
 
 // UserInfo contains user information from the API.
@@ -49,13 +42,13 @@ type SubscriptionInfo struct {
 
 // UsageBreakdown contains usage details.
 type UsageBreakdown struct {
-	UsageLimit                 *int     `json:"usageLimit,omitempty"`
-	CurrentUsage               *int     `json:"currentUsage,omitempty"`
-	UsageLimitWithPrecision    *float64 `json:"usageLimitWithPrecision,omitempty"`
-	CurrentUsageWithPrecision  *float64 `json:"currentUsageWithPrecision,omitempty"`
-	NextDateReset              *float64 `json:"nextDateReset,omitempty"`
-	DisplayName                string   `json:"displayName,omitempty"`
-	ResourceType               string   `json:"resourceType,omitempty"`
+	UsageLimit                *int     `json:"usageLimit,omitempty"`
+	CurrentUsage              *int     `json:"currentUsage,omitempty"`
+	UsageLimitWithPrecision   *float64 `json:"usageLimitWithPrecision,omitempty"`
+	CurrentUsageWithPrecision *float64 `json:"currentUsageWithPrecision,omitempty"`
+	NextDateReset             *float64 `json:"nextDateReset,omitempty"`
+	DisplayName               string   `json:"displayName,omitempty"`
+	ResourceType              string   `json:"resourceType,omitempty"`
 }
 
 // NewCodeWhispererClient creates a new CodeWhisperer client.
@@ -64,40 +57,34 @@ func NewCodeWhispererClient(cfg *config.Config, machineID string) *CodeWhisperer
 	if cfg != nil {
 		client = util.SetProxy(&cfg.SDKConfig, client)
 	}
-	if machineID == "" {
-		machineID = uuid.New().String()
-	}
 	return &CodeWhispererClient{
 		httpClient: client,
-		machineID:  machineID,
 	}
-}
-
-// generateInvocationID generates a unique invocation ID.
-func generateInvocationID() string {
-	return uuid.New().String()
 }
 
 // GetUsageLimits fetches usage limits and user info from CodeWhisperer API.
 // This is the recommended way to get user email after login.
-func (c *CodeWhispererClient) GetUsageLimits(ctx context.Context, accessToken string) (*UsageLimitsResponse, error) {
-	url := fmt.Sprintf("%s/getUsageLimits?isEmailRequired=true&origin=AI_EDITOR&resourceType=AGENTIC_REQUEST", codeWhispererAPI)
+func (c *CodeWhispererClient) GetUsageLimits(ctx context.Context, accessToken, clientID, refreshToken, profileArn string) (*UsageLimitsResponse, error) {
+	queryParams := map[string]string{
+		"origin":       "AI_EDITOR",
+		"resourceType": "AGENTIC_REQUEST",
+	}
+	// Determine endpoint based on profileArn region
+	endpoint := GetKiroAPIEndpointFromProfileArn(profileArn)
+	if profileArn != "" {
+		queryParams["profileArn"] = profileArn
+	} else {
+		queryParams["isEmailRequired"] = "true"
+	}
+	url := buildURL(endpoint, pathGetUsageLimits, queryParams)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Set headers to match Kiro IDE
-	xAmzUserAgent := fmt.Sprintf("aws-sdk-js/1.0.0 KiroIDE-%s-%s", kiroVersion, c.machineID)
-	userAgent := fmt.Sprintf("aws-sdk-js/1.0.0 ua/2.1 os/windows lang/js md/nodejs#20.16.0 api/codewhispererruntime#1.0.0 m/E KiroIDE-%s-%s", kiroVersion, c.machineID)
-
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("x-amz-user-agent", xAmzUserAgent)
-	req.Header.Set("User-Agent", userAgent)
-	req.Header.Set("amz-sdk-invocation-id", generateInvocationID())
-	req.Header.Set("amz-sdk-request", "attempt=1; max=1")
-	req.Header.Set("Connection", "close")
+	accountKey := GetAccountKey(clientID, refreshToken)
+	setRuntimeHeaders(req, accessToken, accountKey)
 
 	log.Debugf("codewhisperer: GET %s", url)
 
@@ -128,8 +115,8 @@ func (c *CodeWhispererClient) GetUsageLimits(ctx context.Context, accessToken st
 
 // FetchUserEmailFromAPI fetches user email using CodeWhisperer getUsageLimits API.
 // This is more reliable than JWT parsing as it uses the official API.
-func (c *CodeWhispererClient) FetchUserEmailFromAPI(ctx context.Context, accessToken string) string {
-	resp, err := c.GetUsageLimits(ctx, accessToken)
+func (c *CodeWhispererClient) FetchUserEmailFromAPI(ctx context.Context, accessToken, clientID, refreshToken string) string {
+	resp, err := c.GetUsageLimits(ctx, accessToken, clientID, refreshToken, "")
 	if err != nil {
 		log.Debugf("codewhisperer: failed to get usage limits: %v", err)
 		return ""
@@ -146,10 +133,10 @@ func (c *CodeWhispererClient) FetchUserEmailFromAPI(ctx context.Context, accessT
 
 // FetchUserEmailWithFallback fetches user email with multiple fallback methods.
 // Priority: 1. CodeWhisperer API  2. userinfo endpoint  3. JWT parsing
-func FetchUserEmailWithFallback(ctx context.Context, cfg *config.Config, accessToken string) string {
+func FetchUserEmailWithFallback(ctx context.Context, cfg *config.Config, accessToken, clientID, refreshToken string) string {
 	// Method 1: Try CodeWhisperer API (most reliable)
 	cwClient := NewCodeWhispererClient(cfg, "")
-	email := cwClient.FetchUserEmailFromAPI(ctx, accessToken)
+	email := cwClient.FetchUserEmailFromAPI(ctx, accessToken, clientID, refreshToken)
 	if email != "" {
 		return email
 	}
