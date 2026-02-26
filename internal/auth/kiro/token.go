@@ -29,7 +29,7 @@ type KiroTokenStorage struct {
 	ClientID string `json:"client_id,omitempty"`
 	// ClientSecret is the OAuth client secret (required for token refresh)
 	ClientSecret string `json:"client_secret,omitempty"`
-	// Region is the AWS region
+	// Region is the OIDC region for IDC login and token refresh
 	Region string `json:"region,omitempty"`
 	// StartURL is the AWS Identity Center start URL (for IDC auth)
 	StartURL string `json:"start_url,omitempty"`

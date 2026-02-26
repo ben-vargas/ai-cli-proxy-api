@@ -7,10 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // PKCECodes holds PKCE verification codes for OAuth2 PKCE flow
@@ -47,7 +50,7 @@ type KiroTokenData struct {
 	Email string `json:"email,omitempty"`
 	// StartURL is the IDC/Identity Center start URL (only for IDC auth method)
 	StartURL string `json:"startUrl,omitempty"`
-	// Region is the AWS region for IDC authentication (only for IDC auth method)
+	// Region is the OIDC region for IDC login and token refresh
 	Region string `json:"region,omitempty"`
 }
 
@@ -519,4 +522,160 @@ func GenerateTokenFileName(tokenData *KiroTokenData) string {
 
 	// Priority 3: Fallback to authMethod only with sequence
 	return fmt.Sprintf("kiro-%s-%05d.json", authMethod, seq)
+}
+
+// DefaultKiroRegion is the fallback region when none is specified.
+const DefaultKiroRegion = "us-east-1"
+
+// GetCodeWhispererLegacyEndpoint returns the legacy CodeWhisperer JSON-RPC endpoint.
+// This endpoint supports JSON-RPC style requests with x-amz-target headers.
+// The Q endpoint (q.{region}.amazonaws.com) does NOT support JSON-RPC style.
+func GetCodeWhispererLegacyEndpoint(region string) string {
+	if region == "" {
+		region = DefaultKiroRegion
+	}
+	return "https://codewhisperer." + region + ".amazonaws.com"
+}
+
+// ProfileARN represents a parsed AWS CodeWhisperer profile ARN.
+// ARN format: arn:partition:service:region:account-id:resource-type/resource-id
+// Example: arn:aws:codewhisperer:us-east-1:123456789012:profile/ABCDEFGHIJKL
+type ProfileARN struct {
+	// Raw is the original ARN string
+	Raw string
+	// Partition is the AWS partition (aws)
+	Partition string
+	// Service is the AWS service name (codewhisperer)
+	Service string
+	// Region is the AWS region (us-east-1, ap-southeast-1, etc.)
+	Region string
+	// AccountID is the AWS account ID
+	AccountID string
+	// ResourceType is the resource type (profile)
+	ResourceType string
+	// ResourceID is the resource identifier (e.g., ABCDEFGHIJKL)
+	ResourceID string
+}
+
+// ParseProfileARN parses an AWS ARN string into a ProfileARN struct.
+// Returns nil if the ARN is empty, invalid, or not a codewhisperer ARN.
+func ParseProfileARN(arn string) *ProfileARN {
+	if arn == "" {
+		return nil
+	}
+	// ARN format: arn:partition:service:region:account-id:resource
+	// Minimum 6 parts separated by ":"
+	parts := strings.Split(arn, ":")
+	if len(parts) < 6 {
+		log.Warnf("invalid ARN format: %s", arn)
+		return nil
+	}
+	// Validate ARN prefix
+	if parts[0] != "arn" {
+		return nil
+	}
+	// Validate partition
+	partition := parts[1]
+	if partition == "" {
+		return nil
+	}
+	// Validate service is codewhisperer
+	service := parts[2]
+	if service != "codewhisperer" {
+		return nil
+	}
+	// Validate region format (must contain "-")
+	region := parts[3]
+	if region == "" || !strings.Contains(region, "-") {
+		return nil
+	}
+	// Account ID
+	accountID := parts[4]
+
+	// Parse resource (format: resource-type/resource-id)
+	// Join remaining parts in case resource contains ":"
+	resource := strings.Join(parts[5:], ":")
+	resourceType := ""
+	resourceID := ""
+	if idx := strings.Index(resource, "/"); idx > 0 {
+		resourceType = resource[:idx]
+		resourceID = resource[idx+1:]
+	} else {
+		resourceType = resource
+	}
+
+	return &ProfileARN{
+		Raw:          arn,
+		Partition:    partition,
+		Service:      service,
+		Region:       region,
+		AccountID:    accountID,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+	}
+}
+
+// GetKiroAPIEndpoint returns the Q API endpoint for the specified region.
+// If region is empty, defaults to us-east-1.
+func GetKiroAPIEndpoint(region string) string {
+	if region == "" {
+		region = DefaultKiroRegion
+	}
+	return "https://q." + region + ".amazonaws.com"
+}
+
+// GetKiroAPIEndpointFromProfileArn extracts region from profileArn and returns the endpoint.
+// Returns default us-east-1 endpoint if region cannot be extracted.
+func GetKiroAPIEndpointFromProfileArn(profileArn string) string {
+	region := ExtractRegionFromProfileArn(profileArn)
+	return GetKiroAPIEndpoint(region)
+}
+
+// ExtractRegionFromProfileArn extracts the AWS region from a ProfileARN string.
+// Returns empty string if ARN is invalid or region cannot be extracted.
+func ExtractRegionFromProfileArn(profileArn string) string {
+	parsed := ParseProfileARN(profileArn)
+	if parsed == nil {
+		return ""
+	}
+	return parsed.Region
+}
+
+// ExtractRegionFromMetadata extracts API region from auth metadata.
+// Priority: api_region > profile_arn > DefaultKiroRegion
+func ExtractRegionFromMetadata(metadata map[string]interface{}) string {
+	if metadata == nil {
+		return DefaultKiroRegion
+	}
+
+	// Priority 1: Explicit api_region override
+	if r, ok := metadata["api_region"].(string); ok && r != "" {
+		return r
+	}
+
+	// Priority 2: Extract from ProfileARN
+	if profileArn, ok := metadata["profile_arn"].(string); ok && profileArn != "" {
+		if region := ExtractRegionFromProfileArn(profileArn); region != "" {
+			return region
+		}
+	}
+
+	return DefaultKiroRegion
+}
+
+func buildURL(endpoint, path string, queryParams map[string]string) string {
+	fullURL := fmt.Sprintf("%s/%s", endpoint, path)
+	if len(queryParams) > 0 {
+		values := url.Values{}
+		for key, value := range queryParams {
+			if value == "" {
+				continue
+			}
+			values.Set(key, value)
+		}
+		if encoded := values.Encode(); encoded != "" {
+			fullURL = fullURL + "?" + encoded
+		}
+	}
+	return fullURL
 }
