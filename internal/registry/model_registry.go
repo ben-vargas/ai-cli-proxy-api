@@ -49,6 +49,10 @@ type ModelInfo struct {
 	SupportedParameters []string `json:"supported_parameters,omitempty"`
 	// SupportedEndpoints lists supported API endpoints (e.g., "/chat/completions", "/responses").
 	SupportedEndpoints []string `json:"supported_endpoints,omitempty"`
+	// SupportedInputModalities lists supported input modalities (e.g., TEXT, IMAGE, VIDEO, AUDIO)
+	SupportedInputModalities []string `json:"supportedInputModalities,omitempty"`
+	// SupportedOutputModalities lists supported output modalities (e.g., TEXT, IMAGE)
+	SupportedOutputModalities []string `json:"supportedOutputModalities,omitempty"`
 
 	// Thinking holds provider-specific reasoning/thinking budget capabilities.
 	// This is optional and currently used for Gemini thinking budget normalization.
