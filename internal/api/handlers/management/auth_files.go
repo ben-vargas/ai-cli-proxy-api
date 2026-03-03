@@ -3047,6 +3047,15 @@ func (h *Handler) GetAuthStatus(c *gin.Context) {
 	deleteOAuthStatus(state)
 }
 
+// PopulateAuthContext extracts request info and adds it to the context
+func PopulateAuthContext(ctx context.Context, c *gin.Context) context.Context {
+	info := &coreauth.RequestInfo{
+		Query:   c.Request.URL.Query(),
+		Headers: c.Request.Header,
+	}
+	return coreauth.WithRequestInfo(ctx, info)
+}
+
 const kiroCallbackPort = 9876
 
 func (h *Handler) RequestKiroToken(c *gin.Context) {
@@ -3179,6 +3188,7 @@ func (h *Handler) RequestKiroToken(c *gin.Context) {
 		}
 
 		isWebUI := isWebUIRequest(c)
+		var forwarder *callbackForwarder
 		if isWebUI {
 			targetURL, errTarget := h.managementCallbackURL("/kiro/callback")
 			if errTarget != nil {
@@ -3186,7 +3196,8 @@ func (h *Handler) RequestKiroToken(c *gin.Context) {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "callback server unavailable"})
 				return
 			}
-			if _, errStart := startCallbackForwarder(kiroCallbackPort, "kiro", targetURL); errStart != nil {
+			var errStart error
+			if forwarder, errStart = startCallbackForwarder(kiroCallbackPort, "kiro", targetURL); errStart != nil {
 				log.WithError(errStart).Error("failed to start kiro callback forwarder")
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start callback server"})
 				return
@@ -3195,7 +3206,7 @@ func (h *Handler) RequestKiroToken(c *gin.Context) {
 
 		go func() {
 			if isWebUI {
-				defer stopCallbackForwarder(kiroCallbackPort)
+				defer stopCallbackForwarderInstance(kiroCallbackPort, forwarder)
 			}
 
 			socialClient := kiroauth.NewSocialAuthClient(h.cfg)
@@ -3399,7 +3410,7 @@ func (h *Handler) RequestKiloToken(c *gin.Context) {
 			Metadata: map[string]any{
 				"email":           status.UserEmail,
 				"organization_id": orgID,
-				"model":          defaults.Model,
+				"model":           defaults.Model,
 			},
 		}
 
