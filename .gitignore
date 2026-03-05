@@ -48,3 +48,7 @@ GEMINI.md
 ._*
 .gocache/
 *.bak
+
+# Build output
+CLIProxyAPIPlus
+CLIProxyAPIPlus.app/
