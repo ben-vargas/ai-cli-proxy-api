@@ -10,6 +10,8 @@ The Plus release stays in lockstep with the mainline features.
 
 So you can use local or multi-account CLI access with OpenAI(include Responses)/Gemini/Claude-compatible clients and SDKs.
 
+GitLab Duo is supported here via OAuth or personal access token login, with model discovery and provider-native routing through the GitLab AI gateway when managed credentials are available.
+
 ## Sponsor
 
 [![z.ai](https://assets.router-for.me/english-5-0.jpg)](https://z.ai/subscribe?ic=8JVLJQFSKB)
