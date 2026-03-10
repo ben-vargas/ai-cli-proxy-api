@@ -74,6 +74,8 @@ VisionCoder is also offering our users a limited-time <a href="https://coder.vis
 
 CLIProxyAPI Guides: [https://help.router-for.me/](https://help.router-for.me/)
 
+GitLab Duo guide: [docs/gitlab-duo.md](docs/gitlab-duo.md)
+
 ## Management API
 
 see [MANAGEMENT_API.md](https://help.router-for.me/management/api)
