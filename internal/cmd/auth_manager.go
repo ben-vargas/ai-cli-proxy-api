@@ -19,6 +19,7 @@ func newAuthManager() *sdkAuth.Manager {
 		sdkAuth.NewAntigravityAuthenticator(),
 		sdkAuth.NewGitHubCopilotAuthenticator(),
 		sdkAuth.NewKiloAuthenticator(),
+		sdkAuth.NewGitLabAuthenticator(),
 	)
 	return manager
 }
