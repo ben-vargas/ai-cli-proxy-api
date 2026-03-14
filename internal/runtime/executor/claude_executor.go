@@ -909,6 +909,9 @@ func applyClaudeHeaders(r *http.Request, auth *cliproxyauth.Auth, apiKey string,
 	if !strings.Contains(baseBetas, "interleaved-thinking") {
 		baseBetas += ",interleaved-thinking-2025-05-14"
 	}
+	if !hasClaude1MHeader && auth != nil && auth.Attributes != nil {
+		hasClaude1MHeader = strings.EqualFold(strings.TrimSpace(auth.Attributes["gitlab_duo_force_context_1m"]), "true")
+	}
 
 	// Merge extra betas from request body and request flags.
 	if len(extraBetas) > 0 {
