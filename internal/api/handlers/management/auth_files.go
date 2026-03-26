@@ -3874,13 +3874,15 @@ func (h *Handler) RequestKiloToken(c *gin.Context) {
 }
 
 // RequestCursorToken initiates the Cursor PKCE authentication flow.
+// Supports multiple accounts via ?label=xxx query parameter.
 // The user opens the returned URL in a browser, logs in, and the server polls
 // until the authentication completes.
 func (h *Handler) RequestCursorToken(c *gin.Context) {
 	ctx := context.Background()
 	ctx = PopulateAuthContext(ctx, c)
 
-	fmt.Println("Initializing Cursor authentication...")
+	label := strings.TrimSpace(c.Query("label"))
+	fmt.Printf("Initializing Cursor authentication (label=%q)...\n", label)
 
 	authParams, err := cursorauth.GenerateAuthParams()
 	if err != nil {
@@ -3917,12 +3919,16 @@ func (h *Handler) RequestCursorToken(c *gin.Context) {
 			metadata["expires_at"] = expiry.Format(time.RFC3339)
 		}
 
-		fileName := "cursor.json"
+		fileName := cursorauth.CredentialFileName(label)
+		displayLabel := "Cursor User"
+		if label != "" {
+			displayLabel = "Cursor " + label
+		}
 		record := &coreauth.Auth{
 			ID:       fileName,
 			Provider: "cursor",
 			FileName: fileName,
-			Label:    "Cursor User",
+			Label:    displayLabel,
 			Metadata: metadata,
 		}
 		savedPath, errSave := h.saveTokenRecord(ctx, record)
