@@ -309,271 +309,12 @@ func LookupStaticModelInfo(modelID string) *ModelInfo {
 	return nil
 }
 
-// GetKiroModels returns the Kiro (AWS CodeWhisperer) model definitions
-func GetKiroModels() []*ModelInfo {
-	return []*ModelInfo{
-		{
-			ID:                  "kiro-auto",
-			Object:              "model",
-			Created:             1732752000, // 2024-11-28
-			OwnedBy:             "aws",
-			Type:                "kiro",
-			DisplayName:         "Kiro Auto",
-			Description:         "Automatic model selection by AWS CodeWhisperer",
-			ContextLength:       200000,
-			MaxCompletionTokens: 64000,
-		},
-		{
-			ID:                  "kiro-claude-opus-4.5",
-			Object:              "model",
-			Created:             1732752000,
-			OwnedBy:             "aws",
-			Type:                "kiro",
-			DisplayName:         "Kiro Claude Opus 4.5",
-			Description:         "Claude Opus 4.5 via Kiro (2.2x credit)",
-			ContextLength:       200000,
-			MaxCompletionTokens: 64000,
-		},
-		{
-			ID:                  "kiro-claude-sonnet-4.5",
-			Object:              "model",
-			Created:             1732752000,
-			OwnedBy:             "aws",
-			Type:                "kiro",
-			DisplayName:         "Kiro Claude Sonnet 4.5",
-			Description:         "Claude Sonnet 4.5 via Kiro (1.3x credit)",
-			ContextLength:       200000,
-			MaxCompletionTokens: 64000,
-		},
-		{
-			ID:                  "kiro-claude-sonnet-4",
-			Object:              "model",
-			Created:             1732752000,
-			OwnedBy:             "aws",
-			Type:                "kiro",
-			DisplayName:         "Kiro Claude Sonnet 4",
-			Description:         "Claude Sonnet 4 via Kiro (1.3x credit)",
-			ContextLength:       200000,
-			MaxCompletionTokens: 64000,
-		},
-		{
-			ID:                  "kiro-claude-haiku-4.5",
-			Object:              "model",
-			Created:             1732752000,
-			OwnedBy:             "aws",
-			Type:                "kiro",
-			DisplayName:         "Kiro Claude Haiku 4.5",
-			Description:         "Claude Haiku 4.5 via Kiro (0.4x credit)",
-			ContextLength:       200000,
-			MaxCompletionTokens: 64000,
-		},
-		// --- Chat Variant (No tool calling, for pure conversation) ---
-		{
-			ID:                  "kiro-claude-opus-4.5-chat",
-			Object:              "model",
-			Created:             1732752000,
-			OwnedBy:             "aws",
-			Type:                "kiro",
-			DisplayName:         "Kiro Claude Opus 4.5 (Chat)",
-			Description:         "Claude Opus 4.5 for chat only (no tool calling)",
-			ContextLength:       200000,
-			MaxCompletionTokens: 64000,
-		},
-		// --- Agentic Variants (Optimized for coding agents with chunked writes) ---
-		{
-			ID:                  "kiro-claude-opus-4.5-agentic",
-			Object:              "model",
-			Created:             1732752000,
-			OwnedBy:             "aws",
-			Type:                "kiro",
-			DisplayName:         "Kiro Claude Opus 4.5 (Agentic)",
-			Description:         "Claude Opus 4.5 optimized for coding agents (chunked writes)",
-			ContextLength:       200000,
-			MaxCompletionTokens: 64000,
-		},
-		{
-			ID:                  "kiro-claude-sonnet-4.5-agentic",
-			Object:              "model",
-			Created:             1732752000,
-			OwnedBy:             "aws",
-			Type:                "kiro",
-			DisplayName:         "Kiro Claude Sonnet 4.5 (Agentic)",
-			Description:         "Claude Sonnet 4.5 optimized for coding agents (chunked writes)",
-			ContextLength:       200000,
-			MaxCompletionTokens: 64000,
-		},
-	}
-}
-
-// GetAmazonQModels returns the Amazon Q (AWS CodeWhisperer) model definitions.
-// These models use the same API as Kiro and share the same executor.
-func GetAmazonQModels() []*ModelInfo {
-	return []*ModelInfo{
-		{
-			ID:                  "amazonq-auto",
-			Object:              "model",
-			Created:             1732752000,
-			OwnedBy:             "aws",
-			Type:                "kiro", // Uses Kiro executor - same API
-			DisplayName:         "Amazon Q Auto",
-			Description:         "Automatic model selection by Amazon Q",
-			ContextLength:       200000,
-			MaxCompletionTokens: 64000,
-		},
-		{
-			ID:                  "amazonq-claude-opus-4.5",
-			Object:              "model",
-			Created:             1732752000,
-			OwnedBy:             "aws",
-			Type:                "kiro",
-			DisplayName:         "Amazon Q Claude Opus 4.5",
-			Description:         "Claude Opus 4.5 via Amazon Q (2.2x credit)",
-			ContextLength:       200000,
-			MaxCompletionTokens: 64000,
-		},
-		{
-			ID:                  "amazonq-claude-sonnet-4.5",
-			Object:              "model",
-			Created:             1732752000,
-			OwnedBy:             "aws",
-			Type:                "kiro",
-			DisplayName:         "Amazon Q Claude Sonnet 4.5",
-			Description:         "Claude Sonnet 4.5 via Amazon Q (1.3x credit)",
-			ContextLength:       200000,
-			MaxCompletionTokens: 64000,
-		},
-		{
-			ID:                  "amazonq-claude-sonnet-4",
-			Object:              "model",
-			Created:             1732752000,
-			OwnedBy:             "aws",
-			Type:                "kiro",
-			DisplayName:         "Amazon Q Claude Sonnet 4",
-			Description:         "Claude Sonnet 4 via Amazon Q (1.3x credit)",
-			ContextLength:       200000,
-			MaxCompletionTokens: 64000,
-		},
-		{
-			ID:                  "amazonq-claude-haiku-4.5",
-			Object:              "model",
-			Created:             1732752000,
-			OwnedBy:             "aws",
-			Type:                "kiro",
-			DisplayName:         "Amazon Q Claude Haiku 4.5",
-			Description:         "Claude Haiku 4.5 via Amazon Q (0.4x credit)",
-			ContextLength:       200000,
-			MaxCompletionTokens: 64000,
-		},
-	}
-}
-
-// GetQwenModels returns the standard Qwen model definitions
-func GetQwenModels() []*ModelInfo {
-	return []*ModelInfo{
-		{
-			ID:                  "qwen3-coder-plus",
-			Object:              "model",
-			Created:             1753228800,
-			OwnedBy:             "qwen",
-			Type:                "qwen",
-			Version:             "3.0",
-			DisplayName:         "Qwen3 Coder Plus",
-			Description:         "Advanced code generation and understanding model",
-			ContextLength:       32768,
-			MaxCompletionTokens: 8192,
-			SupportedParameters: []string{"temperature", "top_p", "max_tokens", "stream", "stop"},
-		},
-		{
-			ID:                  "qwen3-coder-flash",
-			Object:              "model",
-			Created:             1753228800,
-			OwnedBy:             "qwen",
-			Type:                "qwen",
-			Version:             "3.0",
-			DisplayName:         "Qwen3 Coder Flash",
-			Description:         "Fast code generation model",
-			ContextLength:       8192,
-			MaxCompletionTokens: 2048,
-			SupportedParameters: []string{"temperature", "top_p", "max_tokens", "stream", "stop"},
-		},
-		{
-			ID:                  "vision-model",
-			Object:              "model",
-			Created:             1758672000,
-			OwnedBy:             "qwen",
-			Type:                "qwen",
-			Version:             "3.0",
-			DisplayName:         "Qwen3 Vision Model",
-			Description:         "Vision model model",
-			ContextLength:       32768,
-			MaxCompletionTokens: 2048,
-			SupportedParameters: []string{"temperature", "top_p", "max_tokens", "stream", "stop"},
-		},
-	}
-}
-
-// GetIFlowModels returns supported models for iFlow OAuth accounts.
-
-func GetIFlowModels() []*ModelInfo {
-	entries := []struct {
-		ID          string
-		DisplayName string
-		Description string
-		Created     int64
-	}{
-		{ID: "tstars2.0", DisplayName: "TStars-2.0", Description: "iFlow TStars-2.0 multimodal assistant", Created: 1746489600},
-		{ID: "qwen3-coder-plus", DisplayName: "Qwen3-Coder-Plus", Description: "Qwen3 Coder Plus code generation", Created: 1753228800},
-		{ID: "qwen3-coder", DisplayName: "Qwen3-Coder-480B-A35B", Description: "Qwen3 Coder 480B A35B", Created: 1753228800},
-		{ID: "qwen3-max", DisplayName: "Qwen3-Max", Description: "Qwen3 flagship model", Created: 1758672000},
-		{ID: "qwen3-vl-plus", DisplayName: "Qwen3-VL-Plus", Description: "Qwen3 multimodal vision-language", Created: 1758672000},
-		{ID: "qwen3-max-preview", DisplayName: "Qwen3-Max-Preview", Description: "Qwen3 Max preview build", Created: 1757030400},
-		{ID: "kimi-k2-0905", DisplayName: "Kimi-K2-Instruct-0905", Description: "Moonshot Kimi K2 instruct 0905", Created: 1757030400},
-		{ID: "glm-4.6", DisplayName: "GLM-4.6", Description: "Zhipu GLM 4.6 general model", Created: 1759190400},
-		{ID: "kimi-k2", DisplayName: "Kimi-K2", Description: "Moonshot Kimi K2 general model", Created: 1752192000},
-		{ID: "kimi-k2-thinking", DisplayName: "Kimi-K2-Thinking", Description: "Moonshot Kimi K2 general model", Created: 1762387200},
-		{ID: "deepseek-v3.2", DisplayName: "DeepSeek-V3.2-Exp", Description: "DeepSeek V3.2 experimental", Created: 1759104000},
-		{ID: "deepseek-v3.1", DisplayName: "DeepSeek-V3.1-Terminus", Description: "DeepSeek V3.1 Terminus", Created: 1756339200},
-		{ID: "deepseek-r1", DisplayName: "DeepSeek-R1", Description: "DeepSeek reasoning model R1", Created: 1737331200},
-		{ID: "deepseek-v3", DisplayName: "DeepSeek-V3-671B", Description: "DeepSeek V3 671B", Created: 1734307200},
-		{ID: "qwen3-32b", DisplayName: "Qwen3-32B", Description: "Qwen3 32B", Created: 1747094400},
-		{ID: "qwen3-235b-a22b-thinking-2507", DisplayName: "Qwen3-235B-A22B-Thinking", Description: "Qwen3 235B A22B Thinking (2507)", Created: 1753401600},
-		{ID: "qwen3-235b-a22b-instruct", DisplayName: "Qwen3-235B-A22B-Instruct", Description: "Qwen3 235B A22B Instruct", Created: 1753401600},
-		{ID: "qwen3-235b", DisplayName: "Qwen3-235B-A22B", Description: "Qwen3 235B A22B", Created: 1753401600},
-		{ID: "minimax-m2", DisplayName: "MiniMax-M2", Description: "MiniMax M2", Created: 1758672000},
-	}
-	models := make([]*ModelInfo, 0, len(entries))
-	for _, entry := range entries {
-		models = append(models, &ModelInfo{
-			ID:          entry.ID,
-			Object:      "model",
-			Created:     entry.Created,
-			OwnedBy:     "iflow",
-			Type:        "iflow",
-			DisplayName: entry.DisplayName,
-			Description: entry.Description,
-		})
-	}
-	return models
-}
-
-// AntigravityModelConfig captures static antigravity model overrides, including
-// Thinking budget limits and provider max completion tokens.
-type AntigravityModelConfig struct {
-	Thinking            *ThinkingSupport
-	MaxCompletionTokens int
-}
-
-// GetAntigravityModelConfig returns static configuration for antigravity models.
-// Keys use the ALIASED model names (after modelName2Alias conversion) for direct lookup.
-func GetAntigravityModelConfig() map[string]*AntigravityModelConfig {
-	return map[string]*AntigravityModelConfig{
-		"gemini-2.5-flash":                  {Thinking: &ThinkingSupport{Min: 0, Max: 24576, ZeroAllowed: true, DynamicAllowed: true}},
-		"gemini-2.5-flash-lite":             {Thinking: &ThinkingSupport{Min: 0, Max: 24576, ZeroAllowed: true, DynamicAllowed: true}},
-		"gemini-3-pro-preview":              {Thinking: &ThinkingSupport{Min: 128, Max: 32768, ZeroAllowed: false, DynamicAllowed: true}},
-		"gemini-claude-sonnet-4-5-thinking": {Thinking: &ThinkingSupport{Min: 1024, Max: 200000, ZeroAllowed: false, DynamicAllowed: true}, MaxCompletionTokens: 64000},
-		"gemini-claude-opus-4-5-thinking":   {Thinking: &ThinkingSupport{Min: 1024, Max: 200000, ZeroAllowed: false, DynamicAllowed: true}, MaxCompletionTokens: 64000},
-	}
-}
+// defaultCopilotClaudeContextLength is the conservative prompt token limit for
+// Claude models accessed via the GitHub Copilot API. Individual accounts are
+// capped at 128K; business accounts at 168K. When the dynamic /models API fetch
+// succeeds, the real per-account limit overrides this value. This constant is
+// only used as a safe fallback.
+const defaultCopilotClaudeContextLength = 128000
 
 // GetGitHubCopilotModels returns the available models for GitHub Copilot.
 // These models are available through the GitHub Copilot API at api.githubcopilot.com.
@@ -786,7 +527,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Type:                "github-copilot",
 			DisplayName:         "Claude Haiku 4.5",
 			Description:         "Anthropic Claude Haiku 4.5 via GitHub Copilot",
-			ContextLength:       200000,
+			ContextLength:       defaultCopilotClaudeContextLength,
 			MaxCompletionTokens: 64000,
 			SupportedEndpoints:  []string{"/chat/completions"},
 		},
@@ -798,7 +539,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Type:                "github-copilot",
 			DisplayName:         "Claude Opus 4.1",
 			Description:         "Anthropic Claude Opus 4.1 via GitHub Copilot",
-			ContextLength:       200000,
+			ContextLength:       defaultCopilotClaudeContextLength,
 			MaxCompletionTokens: 32000,
 			SupportedEndpoints:  []string{"/chat/completions"},
 		},
@@ -810,7 +551,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Type:                "github-copilot",
 			DisplayName:         "Claude Opus 4.5",
 			Description:         "Anthropic Claude Opus 4.5 via GitHub Copilot",
-			ContextLength:       200000,
+			ContextLength:       defaultCopilotClaudeContextLength,
 			MaxCompletionTokens: 64000,
 			SupportedEndpoints:  []string{"/chat/completions"},
 			Thinking:            &ThinkingSupport{Levels: []string{"low", "medium", "high"}},
@@ -823,7 +564,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Type:                "github-copilot",
 			DisplayName:         "Claude Opus 4.6",
 			Description:         "Anthropic Claude Opus 4.6 via GitHub Copilot",
-			ContextLength:       200000,
+			ContextLength:       defaultCopilotClaudeContextLength,
 			MaxCompletionTokens: 64000,
 			SupportedEndpoints:  []string{"/chat/completions"},
 			Thinking:            &ThinkingSupport{Levels: []string{"low", "medium", "high"}},
@@ -836,7 +577,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Type:                "github-copilot",
 			DisplayName:         "Claude Sonnet 4",
 			Description:         "Anthropic Claude Sonnet 4 via GitHub Copilot",
-			ContextLength:       200000,
+			ContextLength:       defaultCopilotClaudeContextLength,
 			MaxCompletionTokens: 64000,
 			SupportedEndpoints:  []string{"/chat/completions"},
 			Thinking:            &ThinkingSupport{Levels: []string{"low", "medium", "high"}},
@@ -849,7 +590,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Type:                "github-copilot",
 			DisplayName:         "Claude Sonnet 4.5",
 			Description:         "Anthropic Claude Sonnet 4.5 via GitHub Copilot",
-			ContextLength:       200000,
+			ContextLength:       defaultCopilotClaudeContextLength,
 			MaxCompletionTokens: 64000,
 			SupportedEndpoints:  []string{"/chat/completions"},
 			Thinking:            &ThinkingSupport{Levels: []string{"low", "medium", "high"}},
@@ -862,7 +603,7 @@ func GetGitHubCopilotModels() []*ModelInfo {
 			Type:                "github-copilot",
 			DisplayName:         "Claude Sonnet 4.6",
 			Description:         "Anthropic Claude Sonnet 4.6 via GitHub Copilot",
-			ContextLength:       200000,
+			ContextLength:       defaultCopilotClaudeContextLength,
 			MaxCompletionTokens: 64000,
 			SupportedEndpoints:  []string{"/chat/completions"},
 			Thinking:            &ThinkingSupport{Levels: []string{"low", "medium", "high"}},
