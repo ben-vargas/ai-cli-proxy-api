@@ -505,9 +505,9 @@ func TestGitLabExecutorExecuteStreamUsesAnthropicGateway(t *testing.T) {
 	if gotPath != "/v1/proxy/anthropic/v1/messages" {
 		t.Fatalf("Path = %q, want %q", gotPath, "/v1/proxy/anthropic/v1/messages")
 	}
-	if !strings.Contains(gotBetaHeader, gitLabContext1MBeta) {
-		t.Fatalf("Anthropic-Beta = %q, want to contain %q", gotBetaHeader, gitLabContext1MBeta)
-	}
+	// Upstream fix #2866 dropped the obsolete context-1m-2025-08-07 beta header
+	// for the Anthropic gateway path; this test no longer asserts its presence.
+	_ = gotBetaHeader
 	if gotUserAgent != gitLabNativeUserAgent {
 		t.Fatalf("User-Agent = %q, want %q", gotUserAgent, gitLabNativeUserAgent)
 	}
