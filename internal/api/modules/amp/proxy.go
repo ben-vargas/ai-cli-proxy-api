@@ -111,15 +111,11 @@ func createReverseProxy(upstreamURL string, secretSource SecretSource) (*httputi
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		// Log upstream error responses for diagnostics (502, 503, etc.)
 		// These are NOT proxy connection errors - the upstream responded with an error status
+		method, path := responseRequestInfo(resp)
 		if resp.StatusCode >= 500 {
-			log.Errorf("amp upstream responded with error [%d] for %s %s", resp.StatusCode, resp.Request.Method, resp.Request.URL.Path)
+			log.Errorf("amp upstream responded with error [%d] for %s %s", resp.StatusCode, method, path)
 		} else if resp.StatusCode >= 400 {
-			log.Warnf("amp upstream responded with client error [%d] for %s %s", resp.StatusCode, resp.Request.Method, resp.Request.URL.Path)
-		}
-
-		// Only process successful responses for gzip decompression
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil
+			log.Warnf("amp upstream responded with client error [%d] for %s %s", resp.StatusCode, method, path)
 		}
 
 		// Skip if already marked as gzip (Content-Encoding set)
@@ -245,6 +241,16 @@ func isStreamingResponse(resp *http.Response) bool {
 	}
 
 	return false
+}
+
+func responseRequestInfo(resp *http.Response) (string, string) {
+	if resp == nil || resp.Request == nil {
+		return "<unknown>", "<unknown>"
+	}
+	if resp.Request.URL == nil {
+		return resp.Request.Method, "<unknown>"
+	}
+	return resp.Request.Method, resp.Request.URL.Path
 }
 
 // proxyHandler converts httputil.ReverseProxy to gin.HandlerFunc
