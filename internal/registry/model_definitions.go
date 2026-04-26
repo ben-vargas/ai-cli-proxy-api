@@ -207,6 +207,71 @@ func GetCodeBuddyModels() []*ModelInfo {
 	}
 }
 
+// WithCodexBuiltins injects hard-coded Codex-only model definitions that should
+// not depend on remote models.json updates. Built-ins replace any matching IDs
+// already present in the provided slice.
+func WithCodexBuiltins(models []*ModelInfo) []*ModelInfo {
+	return upsertModelInfos(models, codexBuiltinImageModelInfo())
+}
+
+func codexBuiltinImageModelInfo() *ModelInfo {
+	return &ModelInfo{
+		ID:          codexBuiltinImageModelID,
+		Object:      "model",
+		Created:     1704067200, // 2024-01-01
+		OwnedBy:     "openai",
+		Type:        "openai",
+		DisplayName: "GPT Image 2",
+		Version:     codexBuiltinImageModelID,
+	}
+}
+
+func upsertModelInfos(models []*ModelInfo, extras ...*ModelInfo) []*ModelInfo {
+	if len(extras) == 0 {
+		return models
+	}
+
+	extraIDs := make(map[string]struct{}, len(extras))
+	extraList := make([]*ModelInfo, 0, len(extras))
+	for _, extra := range extras {
+		if extra == nil {
+			continue
+		}
+		id := strings.TrimSpace(extra.ID)
+		if id == "" {
+			continue
+		}
+		key := strings.ToLower(id)
+		if _, exists := extraIDs[key]; exists {
+			continue
+		}
+		extraIDs[key] = struct{}{}
+		extraList = append(extraList, cloneModelInfo(extra))
+	}
+
+	if len(extraList) == 0 {
+		return models
+	}
+
+	filtered := make([]*ModelInfo, 0, len(models)+len(extraList))
+	for _, model := range models {
+		if model == nil {
+			continue
+		}
+		id := strings.TrimSpace(model.ID)
+		if id == "" {
+			continue
+		}
+		if _, exists := extraIDs[strings.ToLower(id)]; exists {
+			continue
+		}
+		filtered = append(filtered, model)
+	}
+
+	filtered = append(filtered, extraList...)
+	return filtered
+}
+
 // cloneModelInfos returns a shallow copy of the slice with each element deep-cloned.
 func cloneModelInfos(models []*ModelInfo) []*ModelInfo {
 	if len(models) == 0 {
@@ -229,9 +294,7 @@ func cloneModelInfos(models []*ModelInfo) []*ModelInfo {
 //   - gemini-cli
 //   - aistudio
 //   - codex
-//   - qwen
-//   - iflow
-//   - kiro
+//   - kimi
 //   - kilo
 //   - github-copilot
 //   - amazonq
@@ -250,11 +313,9 @@ func GetStaticModelDefinitionsByChannel(channel string) []*ModelInfo {
 	case "aistudio":
 		return GetAIStudioModels()
 	case "codex":
-		return GetOpenAIModels()
-	case "qwen":
-		return GetQwenModels()
-	case "iflow":
-		return GetIFlowModels()
+		return GetCodexProModels()
+	case "kimi":
+		return GetKimiModels()
 	case "github-copilot":
 		return GetGitHubCopilotModels()
 	case "kiro":
@@ -295,14 +356,14 @@ func LookupStaticModelInfo(modelID string) *ModelInfo {
 
 	data := getModels()
 	allModels := [][]*ModelInfo{
-		GetClaudeModels(),
-		GetGeminiModels(),
-		GetGeminiVertexModels(),
-		GetGeminiCLIModels(),
-		GetAIStudioModels(),
-		GetOpenAIModels(),
-		GetQwenModels(),
-		GetIFlowModels(),
+		data.Claude,
+		data.Gemini,
+		data.Vertex,
+		data.GeminiCLI,
+		data.AIStudio,
+		data.CodexPro,
+		data.Kimi,
+		data.Antigravity,
 		GetGitHubCopilotModels(),
 		GetKiroModels(),
 		GetKiloModels(),

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	kiroauth "github.com/router-for-me/CLIProxyAPI/v6/internal/auth/kiro"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -39,10 +40,33 @@ func (w *Watcher) start(ctx context.Context) error {
 	}
 	log.Debugf("watching auth directory: %s", w.authDir)
 
+	w.watchKiroIDETokenFile()
+
 	go w.processEvents(ctx)
 
 	w.reloadClients(true, nil, false)
 	return nil
+}
+
+func (w *Watcher) watchKiroIDETokenFile() {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		log.Debugf("failed to get home directory for Kiro IDE token watch: %v", err)
+		return
+	}
+
+	kiroTokenDir := filepath.Join(homeDir, ".aws", "sso", "cache")
+
+	if _, statErr := os.Stat(kiroTokenDir); os.IsNotExist(statErr) {
+		log.Debugf("Kiro IDE token directory does not exist: %s", kiroTokenDir)
+		return
+	}
+
+	if errAdd := w.watcher.Add(kiroTokenDir); errAdd != nil {
+		log.Debugf("failed to watch Kiro IDE token directory %s: %v", kiroTokenDir, errAdd)
+		return
+	}
+	log.Debugf("watching Kiro IDE token directory: %s", kiroTokenDir)
 }
 
 func (w *Watcher) processEvents(ctx context.Context) {
@@ -73,8 +97,14 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 	isConfigEvent := normalizedName == normalizedConfigPath && event.Op&configOps != 0
 	authOps := fsnotify.Create | fsnotify.Write | fsnotify.Remove | fsnotify.Rename
 	isAuthJSON := filepath.Dir(normalizedName) == normalizedAuthDir && strings.HasSuffix(normalizedName, ".json") && event.Op&authOps != 0
-	if !isConfigEvent && !isAuthJSON {
+	isKiroIDEToken := w.isKiroIDETokenFile(event.Name) && event.Op&authOps != 0
+	if !isConfigEvent && !isAuthJSON && !isKiroIDEToken {
 		// Ignore unrelated files (e.g., cookie snapshots *.cookie) and other noise.
+		return
+	}
+
+	if isKiroIDEToken {
+		w.handleKiroIDETokenChange(event)
 		return
 	}
 

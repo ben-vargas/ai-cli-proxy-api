@@ -59,10 +59,114 @@ const (
 	// systemInstruction              = "You are Antigravity, a powerful agentic AI coding assistant designed by the Google Deepmind team working on Advanced Agentic Coding.You are pair programming with a USER to solve their coding task. The task may require creating a new codebase, modifying or debugging an existing codebase, or simply answering a question.**Absolute paths only****Proactiveness**"
 )
 
-var (
-	randSource      = rand.New(rand.NewSource(time.Now().UnixNano()))
-	randSourceMutex sync.Mutex
+type antigravity429Category string
+
+type antigravityCreditsFailureState struct {
+	PermanentlyDisabled      bool
+	ExplicitBalanceExhausted bool
+}
+
+type antigravity429DecisionKind string
+
+const (
+	antigravity429Unknown                         antigravity429Category     = "unknown"
+	antigravity429RateLimited                     antigravity429Category     = "rate_limited"
+	antigravity429QuotaExhausted                  antigravity429Category     = "quota_exhausted"
+	antigravity429SoftRateLimit                   antigravity429Category     = "soft_rate_limit"
+	antigravity429DecisionSoftRetry               antigravity429DecisionKind = "soft_retry"
+	antigravity429DecisionInstantRetrySameAuth    antigravity429DecisionKind = "instant_retry_same_auth"
+	antigravity429DecisionShortCooldownSwitchAuth antigravity429DecisionKind = "short_cooldown_switch_auth"
+	antigravity429DecisionFullQuotaExhausted      antigravity429DecisionKind = "full_quota_exhausted"
 )
+
+type antigravity429Decision struct {
+	kind       antigravity429DecisionKind
+	retryAfter *time.Duration
+	reason     string
+}
+
+var (
+	randSource                        = rand.New(rand.NewSource(time.Now().UnixNano()))
+	randSourceMutex                   sync.Mutex
+	antigravityCreditsFailureByAuth   sync.Map
+	antigravityShortCooldownByAuth    sync.Map
+	antigravityCreditsBalanceByAuth   sync.Map // auth.ID → antigravityCreditsBalance
+	antigravityCreditsHintRefreshByID sync.Map // auth.ID → *antigravityCreditsHintRefreshState
+	antigravityQuotaExhaustedKeywords = []string{
+		"quota_exhausted",
+		"quota exhausted",
+	}
+)
+
+type antigravityCreditsBalance struct {
+	CreditAmount    float64
+	MinCreditAmount float64
+	PaidTierID      string
+	Known           bool
+}
+
+type antigravityCreditsHintRefreshState struct {
+	mu          sync.Mutex
+	lastAttempt time.Time
+}
+
+func antigravityAuthHasCredits(auth *cliproxyauth.Auth) bool {
+	if auth == nil || strings.TrimSpace(auth.ID) == "" {
+		return false
+	}
+	if hint, ok := cliproxyauth.GetAntigravityCreditsHint(auth.ID); ok && hint.Known {
+		return hint.Available
+	}
+	val, ok := antigravityCreditsBalanceByAuth.Load(strings.TrimSpace(auth.ID))
+	if !ok {
+		return true // optimistic: assume credits available when balance unknown
+	}
+	bal, valid := val.(antigravityCreditsBalance)
+	if !valid {
+		antigravityCreditsBalanceByAuth.Delete(strings.TrimSpace(auth.ID))
+		return false
+	}
+	if !bal.Known {
+		return false
+	}
+	available := bal.CreditAmount >= bal.MinCreditAmount
+	cliproxyauth.SetAntigravityCreditsHint(strings.TrimSpace(auth.ID), cliproxyauth.AntigravityCreditsHint{
+		Known:           true,
+		Available:       available,
+		CreditAmount:    bal.CreditAmount,
+		MinCreditAmount: bal.MinCreditAmount,
+		PaidTierID:      bal.PaidTierID,
+		UpdatedAt:       time.Now(),
+	})
+	return available
+}
+
+// parseMetaFloat extracts a float64 from auth.Metadata (handles string and numeric types).
+func parseMetaFloat(metadata map[string]any, key string) (float64, bool) {
+	v, ok := metadata[key]
+	if !ok {
+		return 0, false
+	}
+	switch typed := v.(type) {
+	case float64:
+		return typed, true
+	case int:
+		return float64(typed), true
+	case int64:
+		return float64(typed), true
+	case uint64:
+		return float64(typed), true
+	case json.Number:
+		if f, err := typed.Float64(); err == nil {
+			return f, true
+		}
+	case string:
+		if f, err := strconv.ParseFloat(strings.TrimSpace(typed), 64); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
+}
 
 // AntigravityExecutor proxies requests to the antigravity upstream.
 type AntigravityExecutor struct {
@@ -419,8 +523,7 @@ func (e *AntigravityExecutor) Execute(ctx context.Context, auth *cliproxyauth.Au
 	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
 	translated = helps.ApplyPayloadConfigWithRoot(e.cfg, baseModel, "antigravity", "request", translated, originalTranslated, requestedModel)
 
-	translated = applyThinkingMetadataCLI(translated, req.Metadata, req.Model)
-	translated = normalizeAntigravityThinking(req.Model, translated)
+	useCredits := cliproxyauth.AntigravityCreditsRequested(ctx) && antigravityCreditsRetryEnabled(e.cfg)
 
 	baseURLs := antigravityBaseURLFallbackOrder(auth)
 	httpClient := newAntigravityHTTPClient(ctx, e.cfg, auth, 0)
@@ -1074,8 +1177,10 @@ func (e *AntigravityExecutor) ExecuteStream(ctx context.Context, auth *cliproxya
 		return nil, err
 	}
 
-	translated = applyThinkingMetadataCLI(translated, req.Metadata, req.Model)
-	translated = normalizeAntigravityThinking(req.Model, translated)
+	requestedModel := helps.PayloadRequestedModel(opts, req.Model)
+	translated = helps.ApplyPayloadConfigWithRoot(e.cfg, baseModel, "antigravity", "request", translated, originalTranslated, requestedModel)
+
+	useCredits := cliproxyauth.AntigravityCreditsRequested(ctx) && antigravityCreditsRetryEnabled(e.cfg)
 
 	baseURLs := antigravityBaseURLFallbackOrder(auth)
 	httpClient := newAntigravityHTTPClient(ctx, e.cfg, auth, 0)
@@ -1429,34 +1534,10 @@ func (e *AntigravityExecutor) CountTokens(ctx context.Context, auth *cliproxyaut
 			log.Debugf("antigravity executor: rate limited on base url %s, retrying with fallback base url: %s", baseURL, baseURLs[idx+1])
 			continue
 		}
-
-		now := time.Now().Unix()
-		modelConfig := registry.GetAntigravityModelConfig()
-		models := make([]*registry.ModelInfo, 0, len(result.Map()))
-		for originalName := range result.Map() {
-			aliasName := modelName2Alias(originalName)
-			if aliasName != "" {
-				modelInfo := &registry.ModelInfo{
-					ID:          aliasName,
-					Name:        aliasName,
-					Description: aliasName,
-					DisplayName: aliasName,
-					Version:     aliasName,
-					Object:      "model",
-					Created:     now,
-					OwnedBy:     antigravityAuthType,
-					Type:        antigravityAuthType,
-				}
-				// Look up Thinking support from static config using alias name
-				if cfg, ok := modelConfig[aliasName]; ok {
-					if cfg.Thinking != nil {
-						modelInfo.Thinking = cfg.Thinking
-					}
-					if cfg.MaxCompletionTokens > 0 {
-						modelInfo.MaxCompletionTokens = cfg.MaxCompletionTokens
-					}
-				}
-				models = append(models, modelInfo)
+		sErr := statusErr{code: httpResp.StatusCode, msg: string(bodyBytes)}
+		if httpResp.StatusCode == http.StatusTooManyRequests {
+			if retryAfter, parseErr := parseRetryDelay(bodyBytes); parseErr == nil && retryAfter != nil {
+				sErr.retryAfter = retryAfter
 			}
 		}
 		return cliproxyexecutor.Response{}, sErr
@@ -2265,94 +2346,4 @@ func generateProjectID() string {
 	randSourceMutex.Unlock()
 	randomPart := strings.ToLower(uuid.NewString())[:5]
 	return adj + "-" + noun + "-" + randomPart
-}
-
-func modelName2Alias(modelName string) string {
-	switch modelName {
-	case "rev19-uic3-1p":
-		return "gemini-2.5-computer-use-preview-10-2025"
-	case "gemini-3-pro-image":
-		return "gemini-3-pro-image-preview"
-	case "gemini-3-pro-high":
-		return "gemini-3-pro-preview"
-	case "claude-sonnet-4-5":
-		return "gemini-claude-sonnet-4-5"
-	case "claude-sonnet-4-5-thinking":
-		return "gemini-claude-sonnet-4-5-thinking"
-	case "claude-opus-4-5-thinking":
-		return "gemini-claude-opus-4-5-thinking"
-	case "chat_20706", "chat_23310", "gemini-2.5-flash-thinking", "gemini-3-pro-low", "gemini-2.5-pro":
-		return ""
-	default:
-		return modelName
-	}
-}
-
-func alias2ModelName(modelName string) string {
-	switch modelName {
-	case "gemini-2.5-computer-use-preview-10-2025":
-		return "rev19-uic3-1p"
-	case "gemini-3-pro-image-preview":
-		return "gemini-3-pro-image"
-	case "gemini-3-pro-preview":
-		return "gemini-3-pro-high"
-	case "gemini-claude-sonnet-4-5":
-		return "claude-sonnet-4-5"
-	case "gemini-claude-sonnet-4-5-thinking":
-		return "claude-sonnet-4-5-thinking"
-	case "gemini-claude-opus-4-5-thinking":
-		return "claude-opus-4-5-thinking"
-	default:
-		return modelName
-	}
-}
-
-// normalizeAntigravityThinking clamps or removes thinking config based on model support.
-// For Claude models, it additionally ensures thinking budget < max_tokens.
-func normalizeAntigravityThinking(model string, payload []byte) []byte {
-	payload = util.StripThinkingConfigIfUnsupported(model, payload)
-	if !util.ModelSupportsThinking(model) {
-		return payload
-	}
-	budget := gjson.GetBytes(payload, "request.generationConfig.thinkingConfig.thinkingBudget")
-	if !budget.Exists() {
-		return payload
-	}
-	raw := int(budget.Int())
-	normalized := util.NormalizeThinkingBudget(model, raw)
-
-	isClaude := strings.Contains(strings.ToLower(model), "claude")
-	if isClaude {
-		effectiveMax, setDefaultMax := antigravityEffectiveMaxTokens(model, payload)
-		if effectiveMax > 0 && normalized >= effectiveMax {
-			normalized = effectiveMax - 1
-			if normalized < 1 {
-				normalized = 1
-			}
-		}
-		if setDefaultMax {
-			if res, errSet := sjson.SetBytes(payload, "request.generationConfig.maxOutputTokens", effectiveMax); errSet == nil {
-				payload = res
-			}
-		}
-	}
-
-	updated, err := sjson.SetBytes(payload, "request.generationConfig.thinkingConfig.thinkingBudget", normalized)
-	if err != nil {
-		return payload
-	}
-	return updated
-}
-
-// antigravityEffectiveMaxTokens returns the max tokens to cap thinking:
-// prefer request-provided maxOutputTokens; otherwise fall back to model default.
-// The boolean indicates whether the value came from the model default (and thus should be written back).
-func antigravityEffectiveMaxTokens(model string, payload []byte) (max int, fromModel bool) {
-	if maxTok := gjson.GetBytes(payload, "request.generationConfig.maxOutputTokens"); maxTok.Exists() && maxTok.Int() > 0 {
-		return int(maxTok.Int()), false
-	}
-	if modelInfo := registry.GetGlobalRegistry().GetModelInfo(model); modelInfo != nil && modelInfo.MaxCompletionTokens > 0 {
-		return modelInfo.MaxCompletionTokens, true
-	}
-	return 0, false
 }

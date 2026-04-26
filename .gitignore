@@ -42,9 +42,23 @@ GEMINI.md
 .claude/*
 .gemini/*
 .serena/*
+.agent/*
+.agents/*
+.opencode/*
+.idea/*
+.beads/*
+.bmad/*
+_bmad/*
+_bmad-output/*
 .mcp/cache/
 
 # macOS
 .DS_Store
 ._*
+
+# Opencode
+.beads/
+.opencode/
+.cli-proxy-api/
+.venv/
 *.bak

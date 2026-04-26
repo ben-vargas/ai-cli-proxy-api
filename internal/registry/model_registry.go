@@ -533,8 +533,18 @@ func cloneModelInfo(model *ModelInfo) *ModelInfo {
 	if len(model.SupportedParameters) > 0 {
 		copyModel.SupportedParameters = append([]string(nil), model.SupportedParameters...)
 	}
-	if len(model.SupportedEndpoints) > 0 {
-		copyModel.SupportedEndpoints = append([]string(nil), model.SupportedEndpoints...)
+	if len(model.SupportedInputModalities) > 0 {
+		copyModel.SupportedInputModalities = append([]string(nil), model.SupportedInputModalities...)
+	}
+	if len(model.SupportedOutputModalities) > 0 {
+		copyModel.SupportedOutputModalities = append([]string(nil), model.SupportedOutputModalities...)
+	}
+	if model.Thinking != nil {
+		copyThinking := *model.Thinking
+		if len(model.Thinking.Levels) > 0 {
+			copyThinking.Levels = append([]string(nil), model.Thinking.Levels...)
+		}
+		copyModel.Thinking = &copyThinking
 	}
 	return &copyModel
 }

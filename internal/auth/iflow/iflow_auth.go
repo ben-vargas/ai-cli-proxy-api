@@ -321,17 +321,23 @@ func (ia *IFlowAuth) AuthenticateWithCookie(ctx context.Context, cookie string) 
 		return nil, fmt.Errorf("iflow cookie authentication: cookie is empty")
 	}
 
-	// First, get initial API key information using GET request
+	// First, get initial API key information using GET request to obtain the name
 	keyInfo, err := ia.fetchAPIKeyInfo(ctx, cookie)
 	if err != nil {
 		return nil, fmt.Errorf("iflow cookie authentication: fetch initial API key info failed: %w", err)
 	}
 
-	// Convert to token data format
+	// Refresh the API key using POST request
+	refreshedKeyInfo, err := ia.RefreshAPIKey(ctx, cookie, keyInfo.Name)
+	if err != nil {
+		return nil, fmt.Errorf("iflow cookie authentication: refresh API key failed: %w", err)
+	}
+
+	// Convert to token data format using refreshed key
 	data := &IFlowTokenData{
-		APIKey: keyInfo.APIKey,
-		Expire: keyInfo.ExpireTime,
-		Email:  keyInfo.Name,
+		APIKey: refreshedKeyInfo.APIKey,
+		Expire: refreshedKeyInfo.ExpireTime,
+		Email:  refreshedKeyInfo.Name,
 		Cookie: cookie,
 	}
 
@@ -500,11 +506,18 @@ func (ia *IFlowAuth) CreateCookieTokenStorage(data *IFlowTokenData) *IFlowTokenS
 		return nil
 	}
 
+	// Only save the BXAuth field from the cookie
+	bxAuth := ExtractBXAuth(data.Cookie)
+	cookieToSave := ""
+	if bxAuth != "" {
+		cookieToSave = "BXAuth=" + bxAuth + ";"
+	}
+
 	return &IFlowTokenStorage{
 		APIKey:      data.APIKey,
 		Email:       data.Email,
 		Expire:      data.Expire,
-		Cookie:      data.Cookie,
+		Cookie:      cookieToSave,
 		LastRefresh: time.Now().Format(time.RFC3339),
 		Type:        "iflow",
 	}

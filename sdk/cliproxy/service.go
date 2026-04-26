@@ -118,7 +118,6 @@ func newDefaultAuthManager() *sdkAuth.Manager {
 		sdkAuth.NewGeminiAuthenticator(),
 		sdkAuth.NewCodexAuthenticator(),
 		sdkAuth.NewClaudeAuthenticator(),
-		sdkAuth.NewQwenAuthenticator(),
 		sdkAuth.NewGitLabAuthenticator(),
 	)
 }
@@ -435,12 +434,6 @@ func (s *Service) ensureExecutorsForAuthWithMode(a *coreauth.Auth, forceReplace 
 		s.coreManager.RegisterExecutor(executor.NewAntigravityExecutor(s.cfg))
 	case "claude":
 		s.coreManager.RegisterExecutor(executor.NewClaudeExecutor(s.cfg))
-	case "codex":
-		s.coreManager.RegisterExecutor(executor.NewCodexExecutor(s.cfg))
-	case "qwen":
-		s.coreManager.RegisterExecutor(executor.NewQwenExecutor(s.cfg))
-	case "iflow":
-		s.coreManager.RegisterExecutor(executor.NewIFlowExecutor(s.cfg))
 	case "kimi":
 		s.coreManager.RegisterExecutor(executor.NewKimiExecutor(s.cfg))
 	case "kiro":
@@ -942,11 +935,30 @@ func (s *Service) registerModelsForAuth(a *coreauth.Auth) {
 		}
 		models = applyExcludedModels(models, excluded)
 	case "codex":
-		models = registry.GetOpenAIModels()
-	case "qwen":
-		models = registry.GetQwenModels()
-	case "iflow":
-		models = registry.GetIFlowModels()
+		codexPlanType := ""
+		if a.Attributes != nil {
+			codexPlanType = strings.TrimSpace(a.Attributes["plan_type"])
+		}
+		switch strings.ToLower(codexPlanType) {
+		case "pro":
+			models = registry.GetCodexProModels()
+		case "plus":
+			models = registry.GetCodexPlusModels()
+		case "team", "business", "go":
+			models = registry.GetCodexTeamModels()
+		case "free":
+			models = registry.GetCodexFreeModels()
+		default:
+			models = registry.GetCodexProModels()
+		}
+		if entry := s.resolveConfigCodexKey(a); entry != nil {
+			if len(entry.Models) > 0 {
+				models = buildCodexConfigModels(entry)
+			}
+			if authKind == "apikey" {
+				excluded = entry.ExcludedModels
+			}
+		}
 		models = applyExcludedModels(models, excluded)
 	case "kimi":
 		models = registry.GetKimiModels()
@@ -1014,9 +1026,6 @@ func (s *Service) registerModelsForAuth(a *coreauth.Auth) {
 			}
 			for i := range s.cfg.OpenAICompatibility {
 				compat := &s.cfg.OpenAICompatibility[i]
-				if compat.Disabled {
-					continue
-				}
 				if strings.EqualFold(compat.Name, compatName) {
 					isCompatAuth = true
 					// Convert compatibility models to registry models

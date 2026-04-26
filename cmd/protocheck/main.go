@@ -16,7 +16,7 @@ func main() {
 		"mcp_result", "mcpResult", "McpResult", "MCP_RESULT",
 		"shell_result", "shellResult",
 	}
-	
+
 	for _, name := range names {
 		fd := ecm.Descriptor().Fields().ByName(protoreflect.Name(name))
 		if fd != nil {
@@ -25,7 +25,7 @@ func main() {
 			fmt.Printf("Field %q NOT FOUND\n", name)
 		}
 	}
-	
+
 	// List all fields
 	fmt.Println("\nAll fields in ExecClientMessage:")
 	for i := 0; i < ecm.Descriptor().Fields().Len(); i++ {
