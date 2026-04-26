@@ -84,8 +84,8 @@ func (u claudeUsageTokens) OpenAIUsage() (promptTokens, completionTokens, totalT
 //   - param: A pointer to a parameter object for maintaining state between calls
 //
 // Returns:
-//   - []string: A slice of strings, each containing an OpenAI-compatible JSON response
-func ConvertClaudeResponseToOpenAI(_ context.Context, modelName string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) []string {
+//   - [][]byte: A slice of OpenAI-compatible JSON responses
+func ConvertClaudeResponseToOpenAI(_ context.Context, modelName string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) [][]byte {
 	var localParam any
 	if param == nil {
 		param = &localParam

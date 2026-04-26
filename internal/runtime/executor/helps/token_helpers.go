@@ -2,8 +2,6 @@ package helps
 
 import (
 	"fmt"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -11,100 +9,80 @@ import (
 	"github.com/tiktoken-go/tokenizer"
 )
 
-// tokenizerCache stores tokenizer instances to avoid repeated creation
+// tokenizerCache stores tokenizer instances to avoid repeated creation.
 var tokenizerCache sync.Map
 
-// TokenizerWrapper wraps a tokenizer codec with an adjustment factor for models
-// where tiktoken may not accurately estimate token counts (e.g., Claude models)
-type TokenizerWrapper struct {
-	Codec            tokenizer.Codec
-	AdjustmentFactor float64 // 1.0 means no adjustment, >1.0 means tiktoken underestimates
+type adjustedTokenizer struct {
+	tokenizer.Codec
+	adjustmentFactor float64
 }
 
-// Count returns the token count with adjustment factor applied
-func (tw *TokenizerWrapper) Count(text string) (int, error) {
+func (tw *adjustedTokenizer) Count(text string) (int, error) {
 	count, err := tw.Codec.Count(text)
 	if err != nil {
 		return 0, err
 	}
-	if tw.AdjustmentFactor != 1.0 && tw.AdjustmentFactor > 0 {
-		return int(float64(count) * tw.AdjustmentFactor), nil
+	if tw.adjustmentFactor > 0 && tw.adjustmentFactor != 1.0 {
+		return int(float64(count) * tw.adjustmentFactor), nil
 	}
 	return count, nil
 }
 
-// getTokenizer returns a cached tokenizer for the given model.
-// This improves performance by avoiding repeated tokenizer creation.
-func getTokenizer(model string) (*TokenizerWrapper, error) {
-	// Check cache first
-	if cached, ok := tokenizerCache.Load(model); ok {
-		return cached.(*TokenizerWrapper), nil
+// TokenizerForModel returns a tokenizer codec suitable for an OpenAI-style model id.
+// For Claude-like models, it applies an adjustment factor since tiktoken may underestimate token counts.
+func TokenizerForModel(model string) (tokenizer.Codec, error) {
+	sanitized := strings.ToLower(strings.TrimSpace(model))
+	if cached, ok := tokenizerCache.Load(sanitized); ok {
+		return cached.(tokenizer.Codec), nil
 	}
 
-	// Cache miss, create new tokenizer
-	wrapper, err := tokenizerForModel(model)
+	enc, err := tokenizerForModel(sanitized)
 	if err != nil {
 		return nil, err
 	}
 
-	// Store in cache (use LoadOrStore to handle race conditions)
-	actual, _ := tokenizerCache.LoadOrStore(model, wrapper)
-	return actual.(*TokenizerWrapper), nil
+	actual, _ := tokenizerCache.LoadOrStore(sanitized, enc)
+	return actual.(tokenizer.Codec), nil
 }
 
-// tokenizerForModel returns a tokenizer codec suitable for an OpenAI-style model id.
-// For Claude models, applies a 1.1 adjustment factor since tiktoken may underestimate.
-func tokenizerForModel(model string) (*TokenizerWrapper, error) {
-	sanitized := strings.ToLower(strings.TrimSpace(model))
+func tokenizerForModel(sanitized string) (tokenizer.Codec, error) {
+	if sanitized == "" {
+		return tokenizer.Get(tokenizer.Cl100kBase)
+	}
 
-	// Claude models use cl100k_base with 1.1 adjustment factor
-	// because tiktoken may underestimate Claude's actual token count
+	// Claude models use cl100k_base with an adjustment factor because tiktoken may underestimate.
 	if strings.Contains(sanitized, "claude") || strings.HasPrefix(sanitized, "kiro-") || strings.HasPrefix(sanitized, "amazonq-") {
 		enc, err := tokenizer.Get(tokenizer.Cl100kBase)
 		if err != nil {
 			return nil, err
 		}
-		return &TokenizerWrapper{Codec: enc, AdjustmentFactor: 1.1}, nil
+		return &adjustedTokenizer{Codec: enc, adjustmentFactor: 1.1}, nil
 	}
-
-	var enc tokenizer.Codec
-	var err error
 
 	switch {
-	case sanitized == "":
-		enc, err = tokenizer.Get(tokenizer.Cl100kBase)
-	case strings.HasPrefix(sanitized, "gpt-5.2"):
-		enc, err = tokenizer.ForModel(tokenizer.GPT5)
-	case strings.HasPrefix(sanitized, "gpt-5.1"):
-		enc, err = tokenizer.ForModel(tokenizer.GPT5)
 	case strings.HasPrefix(sanitized, "gpt-5"):
-		enc, err = tokenizer.ForModel(tokenizer.GPT5)
+		return tokenizer.ForModel(tokenizer.GPT5)
 	case strings.HasPrefix(sanitized, "gpt-4.1"):
-		enc, err = tokenizer.ForModel(tokenizer.GPT41)
+		return tokenizer.ForModel(tokenizer.GPT41)
 	case strings.HasPrefix(sanitized, "gpt-4o"):
-		enc, err = tokenizer.ForModel(tokenizer.GPT4o)
+		return tokenizer.ForModel(tokenizer.GPT4o)
 	case strings.HasPrefix(sanitized, "gpt-4"):
-		enc, err = tokenizer.ForModel(tokenizer.GPT4)
+		return tokenizer.ForModel(tokenizer.GPT4)
 	case strings.HasPrefix(sanitized, "gpt-3.5"), strings.HasPrefix(sanitized, "gpt-3"):
-		enc, err = tokenizer.ForModel(tokenizer.GPT35Turbo)
+		return tokenizer.ForModel(tokenizer.GPT35Turbo)
 	case strings.HasPrefix(sanitized, "o1"):
-		enc, err = tokenizer.ForModel(tokenizer.O1)
+		return tokenizer.ForModel(tokenizer.O1)
 	case strings.HasPrefix(sanitized, "o3"):
-		enc, err = tokenizer.ForModel(tokenizer.O3)
+		return tokenizer.ForModel(tokenizer.O3)
 	case strings.HasPrefix(sanitized, "o4"):
-		enc, err = tokenizer.ForModel(tokenizer.O4Mini)
+		return tokenizer.ForModel(tokenizer.O4Mini)
 	default:
-		enc, err = tokenizer.Get(tokenizer.O200kBase)
+		return tokenizer.Get(tokenizer.O200kBase)
 	}
-
-	if err != nil {
-		return nil, err
-	}
-	return &TokenizerWrapper{Codec: enc, AdjustmentFactor: 1.0}, nil
 }
 
-// countOpenAIChatTokens approximates prompt tokens for OpenAI chat completions payloads.
-func countOpenAIChatTokens(enc *TokenizerWrapper, payload []byte) (int64, error) {
+// CountOpenAIChatTokens approximates prompt tokens for OpenAI chat completions payloads.
+func CountOpenAIChatTokens(enc tokenizer.Codec, payload []byte) (int64, error) {
 	if enc == nil {
 		return 0, fmt.Errorf("encoder is nil")
 	}
@@ -128,22 +106,15 @@ func countOpenAIChatTokens(enc *TokenizerWrapper, payload []byte) (int64, error)
 		return 0, nil
 	}
 
-	// Count text tokens
 	count, err := enc.Count(joined)
 	if err != nil {
 		return 0, err
 	}
-
-	// Extract and add image tokens from placeholders
-	imageTokens := extractImageTokens(joined)
-
-	return int64(count) + int64(imageTokens), nil
+	return int64(count), nil
 }
 
-// countClaudeChatTokens approximates prompt tokens for Claude API chat completions payloads.
-// This handles Claude's message format with system, messages, and tools.
-// Image tokens are estimated based on image dimensions when available.
-func countClaudeChatTokens(enc *TokenizerWrapper, payload []byte) (int64, error) {
+// CountClaudeChatTokens approximates prompt tokens for Claude API chat payloads.
+func CountClaudeChatTokens(enc tokenizer.Codec, payload []byte) (int64, error) {
 	if enc == nil {
 		return 0, fmt.Errorf("encoder is nil")
 	}
@@ -153,181 +124,21 @@ func countClaudeChatTokens(enc *TokenizerWrapper, payload []byte) (int64, error)
 
 	root := gjson.ParseBytes(payload)
 	segments := make([]string, 0, 32)
+	imageTokens := 0
 
-	// Collect system prompt (can be string or array of content blocks)
-	collectClaudeSystem(root.Get("system"), &segments)
-
-	// Collect messages
-	collectClaudeMessages(root.Get("messages"), &segments)
-
-	// Collect tools
+	collectClaudeContent(root.Get("system"), &segments, &imageTokens)
+	collectClaudeMessages(root.Get("messages"), &segments, &imageTokens)
 	collectClaudeTools(root.Get("tools"), &segments)
 
 	joined := strings.TrimSpace(strings.Join(segments, "\n"))
 	if joined == "" {
-		return 0, nil
+		return int64(imageTokens), nil
 	}
-
-	// Count text tokens
 	count, err := enc.Count(joined)
 	if err != nil {
 		return 0, err
 	}
-
-	// Extract and add image tokens from placeholders
-	imageTokens := extractImageTokens(joined)
-
-	return int64(count) + int64(imageTokens), nil
-}
-
-// imageTokenPattern matches [IMAGE:xxx tokens] format for extracting estimated image tokens
-var imageTokenPattern = regexp.MustCompile(`\[IMAGE:(\d+) tokens\]`)
-
-// extractImageTokens extracts image token estimates from placeholder text.
-// Placeholders are in the format [IMAGE:xxx tokens] where xxx is the estimated token count.
-func extractImageTokens(text string) int {
-	matches := imageTokenPattern.FindAllStringSubmatch(text, -1)
-	total := 0
-	for _, match := range matches {
-		if len(match) > 1 {
-			if tokens, err := strconv.Atoi(match[1]); err == nil {
-				total += tokens
-			}
-		}
-	}
-	return total
-}
-
-// estimateImageTokens calculates estimated tokens for an image based on dimensions.
-// Based on Claude's image token calculation: tokens ≈ (width * height) / 750
-// Minimum 85 tokens, maximum 1590 tokens (for 1568x1568 images).
-func estimateImageTokens(width, height float64) int {
-	if width <= 0 || height <= 0 {
-		// No valid dimensions, use default estimate (medium-sized image)
-		return 1000
-	}
-
-	tokens := int(width * height / 750)
-
-	// Apply bounds
-	if tokens < 85 {
-		tokens = 85
-	}
-	if tokens > 1590 {
-		tokens = 1590
-	}
-
-	return tokens
-}
-
-// collectClaudeSystem extracts text from Claude's system field.
-// System can be a string or an array of content blocks.
-func collectClaudeSystem(system gjson.Result, segments *[]string) {
-	if !system.Exists() {
-		return
-	}
-	if system.Type == gjson.String {
-		addIfNotEmpty(segments, system.String())
-		return
-	}
-	if system.IsArray() {
-		system.ForEach(func(_, block gjson.Result) bool {
-			blockType := block.Get("type").String()
-			if blockType == "text" || blockType == "" {
-				addIfNotEmpty(segments, block.Get("text").String())
-			}
-			// Also handle plain string blocks
-			if block.Type == gjson.String {
-				addIfNotEmpty(segments, block.String())
-			}
-			return true
-		})
-	}
-}
-
-// collectClaudeMessages extracts text from Claude's messages array.
-func collectClaudeMessages(messages gjson.Result, segments *[]string) {
-	if !messages.Exists() || !messages.IsArray() {
-		return
-	}
-	messages.ForEach(func(_, message gjson.Result) bool {
-		addIfNotEmpty(segments, message.Get("role").String())
-		collectClaudeContent(message.Get("content"), segments)
-		return true
-	})
-}
-
-// collectClaudeContent extracts text from Claude's content field.
-// Content can be a string or an array of content blocks.
-// For images, estimates token count based on dimensions when available.
-func collectClaudeContent(content gjson.Result, segments *[]string) {
-	if !content.Exists() {
-		return
-	}
-	if content.Type == gjson.String {
-		addIfNotEmpty(segments, content.String())
-		return
-	}
-	if content.IsArray() {
-		content.ForEach(func(_, part gjson.Result) bool {
-			partType := part.Get("type").String()
-			switch partType {
-			case "text":
-				addIfNotEmpty(segments, part.Get("text").String())
-			case "image":
-				// Estimate image tokens based on dimensions if available
-				source := part.Get("source")
-				if source.Exists() {
-					width := source.Get("width").Float()
-					height := source.Get("height").Float()
-					if width > 0 && height > 0 {
-						tokens := estimateImageTokens(width, height)
-						addIfNotEmpty(segments, fmt.Sprintf("[IMAGE:%d tokens]", tokens))
-					} else {
-						// No dimensions available, use default estimate
-						addIfNotEmpty(segments, "[IMAGE:1000 tokens]")
-					}
-				} else {
-					// No source info, use default estimate
-					addIfNotEmpty(segments, "[IMAGE:1000 tokens]")
-				}
-			case "tool_use":
-				addIfNotEmpty(segments, part.Get("id").String())
-				addIfNotEmpty(segments, part.Get("name").String())
-				if input := part.Get("input"); input.Exists() {
-					addIfNotEmpty(segments, input.Raw)
-				}
-			case "tool_result":
-				addIfNotEmpty(segments, part.Get("tool_use_id").String())
-				collectClaudeContent(part.Get("content"), segments)
-			case "thinking":
-				addIfNotEmpty(segments, part.Get("thinking").String())
-			default:
-				// For unknown types, try to extract any text content
-				if part.Type == gjson.String {
-					addIfNotEmpty(segments, part.String())
-				} else if part.Type == gjson.JSON {
-					addIfNotEmpty(segments, part.Raw)
-				}
-			}
-			return true
-		})
-	}
-}
-
-// collectClaudeTools extracts text from Claude's tools array.
-func collectClaudeTools(tools gjson.Result, segments *[]string) {
-	if !tools.Exists() || !tools.IsArray() {
-		return
-	}
-	tools.ForEach(func(_, tool gjson.Result) bool {
-		addIfNotEmpty(segments, tool.Get("name").String())
-		addIfNotEmpty(segments, tool.Get("description").String())
-		if inputSchema := tool.Get("input_schema"); inputSchema.Exists() {
-			addIfNotEmpty(segments, inputSchema.Raw)
-		}
-		return true
-	})
+	return int64(count + imageTokens), nil
 }
 
 // BuildOpenAIUsageJSON returns a minimal usage structure understood by downstream translators.
@@ -489,6 +300,98 @@ func appendToolPayload(tool gjson.Result, segments *[]string) {
 			addIfNotEmpty(segments, params.Raw)
 		}
 	}
+}
+
+func collectClaudeMessages(messages gjson.Result, segments *[]string, imageTokens *int) {
+	if !messages.Exists() || !messages.IsArray() {
+		return
+	}
+	messages.ForEach(func(_, message gjson.Result) bool {
+		addIfNotEmpty(segments, message.Get("role").String())
+		collectClaudeContent(message.Get("content"), segments, imageTokens)
+		return true
+	})
+}
+
+func collectClaudeContent(content gjson.Result, segments *[]string, imageTokens *int) {
+	if !content.Exists() {
+		return
+	}
+	if content.Type == gjson.String {
+		addIfNotEmpty(segments, content.String())
+		return
+	}
+	if content.IsArray() {
+		content.ForEach(func(_, part gjson.Result) bool {
+			partType := part.Get("type").String()
+			switch partType {
+			case "text":
+				addIfNotEmpty(segments, part.Get("text").String())
+			case "image":
+				source := part.Get("source")
+				width := source.Get("width").Float()
+				height := source.Get("height").Float()
+				if imageTokens != nil {
+					*imageTokens += estimateImageTokens(width, height)
+				}
+			case "tool_use":
+				addIfNotEmpty(segments, part.Get("id").String())
+				addIfNotEmpty(segments, part.Get("name").String())
+				if input := part.Get("input"); input.Exists() {
+					addIfNotEmpty(segments, input.Raw)
+				}
+			case "tool_result":
+				addIfNotEmpty(segments, part.Get("tool_use_id").String())
+				collectClaudeContent(part.Get("content"), segments, imageTokens)
+			case "thinking":
+				addIfNotEmpty(segments, part.Get("thinking").String())
+			default:
+				if part.Type == gjson.String {
+					addIfNotEmpty(segments, part.String())
+				} else if part.Type == gjson.JSON {
+					addIfNotEmpty(segments, part.Raw)
+				}
+			}
+			return true
+		})
+		return
+	}
+	if content.Type == gjson.JSON {
+		addIfNotEmpty(segments, content.Raw)
+	}
+}
+
+func collectClaudeTools(tools gjson.Result, segments *[]string) {
+	if !tools.Exists() || !tools.IsArray() {
+		return
+	}
+	tools.ForEach(func(_, tool gjson.Result) bool {
+		addIfNotEmpty(segments, tool.Get("name").String())
+		addIfNotEmpty(segments, tool.Get("description").String())
+		if inputSchema := tool.Get("input_schema"); inputSchema.Exists() {
+			addIfNotEmpty(segments, inputSchema.Raw)
+		}
+		return true
+	})
+}
+
+// estimateImageTokens calculates estimated tokens for an image based on dimensions.
+// Based on Claude's image token calculation: tokens ≈ (width * height) / 750
+// Minimum 85 tokens, maximum 1590 tokens (for 1568x1568 images).
+func estimateImageTokens(width, height float64) int {
+	if width <= 0 || height <= 0 {
+		// No valid dimensions, use default estimate (medium-sized image).
+		return 1000
+	}
+
+	tokens := int(width * height / 750)
+	if tokens < 85 {
+		return 85
+	}
+	if tokens > 1590 {
+		return 1590
+	}
+	return tokens
 }
 
 func addIfNotEmpty(segments *[]string, value string) {

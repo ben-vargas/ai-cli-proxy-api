@@ -37,15 +37,15 @@ const maxBufferedResponseBytes = 2 * 1024 * 1024 // 2MB safety cap
 
 func looksLikeSSEChunk(data []byte) bool {
 	// Fallback detection: some upstreams may omit/lie about Content-Type, causing SSE to be buffered.
-	// Heuristics are intentionally simple and cheap.
-	return bytes.Contains(data, []byte("data:")) ||
-		bytes.Contains(data, []byte("event:")) ||
-		bytes.Contains(data, []byte("message_start")) ||
-		bytes.Contains(data, []byte("message_delta")) ||
-		bytes.Contains(data, []byte("content_block_start")) ||
-		bytes.Contains(data, []byte("content_block_delta")) ||
-		bytes.Contains(data, []byte("content_block_stop")) ||
-		bytes.Contains(data, []byte("\n\n"))
+	// We conservatively detect SSE by checking for "data:" / "event:" at the start of any line.
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		trimmed := bytes.TrimSpace(line)
+		if bytes.HasPrefix(trimmed, []byte("data:")) ||
+			bytes.HasPrefix(trimmed, []byte("event:")) {
+			return true
+		}
+	}
+	return false
 }
 
 func (rw *ResponseRewriter) enableStreaming(reason string) error {
