@@ -184,10 +184,8 @@ func createAuthForChannel(channel string) *Auth {
 		return &Auth{Provider: "aistudio"}
 	case "antigravity":
 		return &Auth{Provider: "antigravity"}
-	case "qwen":
-		return &Auth{Provider: "qwen"}
-	case "iflow":
-		return &Auth{Provider: "iflow"}
+	case "kimi":
+		return &Auth{Provider: "kimi"}
 	case "kiro":
 		return &Auth{Provider: "kiro"}
 	case "github-copilot":

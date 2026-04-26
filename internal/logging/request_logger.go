@@ -114,6 +114,22 @@ type StreamingLogWriter interface {
 	//   - error: An error if writing fails, nil otherwise
 	WriteAPIResponse(apiResponse []byte) error
 
+	// WriteAPIWebsocketTimeline writes the upstream websocket timeline to the log.
+	// This should be called when upstream communication happened over websocket.
+	//
+	// Parameters:
+	//   - apiWebsocketTimeline: The upstream websocket event timeline
+	//
+	// Returns:
+	//   - error: An error if writing fails, nil otherwise
+	WriteAPIWebsocketTimeline(apiWebsocketTimeline []byte) error
+
+	// SetFirstChunkTimestamp sets the TTFB timestamp captured when first chunk was received.
+	//
+	// Parameters:
+	//   - timestamp: The time when first response chunk was received
+	SetFirstChunkTimestamp(timestamp time.Time)
+
 	// Close finalizes the log file and cleans up resources.
 	//
 	// Returns:
@@ -335,11 +351,17 @@ func (l *FileRequestLogger) LogStreamingRequest(url, method string, headers map[
 
 	// Create streaming writer
 	writer := &FileStreamingLogWriter{
-		file:           file,
-		chunkChan:      make(chan []byte, 100), // Buffered channel for async writes
-		closeChan:      make(chan struct{}),
-		errorChan:      make(chan error, 1),
-		bufferedChunks: &bytes.Buffer{},
+		logFilePath:      filePath,
+		url:              url,
+		method:           method,
+		timestamp:        time.Now(),
+		requestHeaders:   requestHeaders,
+		requestBodyPath:  requestBodyPath,
+		responseBodyPath: responseBodyPath,
+		responseBodyFile: responseBodyFile,
+		chunkChan:        make(chan []byte, 100), // Buffered channel for async writes
+		closeChan:        make(chan struct{}),
+		errorChan:        make(chan error, 1),
 	}
 
 	// Start async writer goroutine
@@ -1132,13 +1154,34 @@ func (l *FileRequestLogger) formatRequestInfo(url, method string, headers map[st
 }
 
 // FileStreamingLogWriter implements StreamingLogWriter for file-based streaming logs.
-// It handles asynchronous writing of streaming response chunks to a file.
-// All data is buffered and written in the correct order when Close is called.
+// It spools streaming response chunks to a temporary file to avoid retaining large responses in memory.
+// The final log file is assembled when Close is called.
 type FileStreamingLogWriter struct {
 	// logFilePath is the final log file path.
 	logFilePath string
 
-	// chunkChan is a channel for receiving response chunks to buffer.
+	// url is the request URL (masked upstream in middleware).
+	url string
+
+	// method is the HTTP method.
+	method string
+
+	// timestamp is captured when the streaming log is initialized.
+	timestamp time.Time
+
+	// requestHeaders stores the request headers.
+	requestHeaders map[string][]string
+
+	// requestBodyPath is a temporary file path holding the request body.
+	requestBodyPath string
+
+	// responseBodyPath is a temporary file path holding the streaming response body.
+	responseBodyPath string
+
+	// responseBodyFile is the temp file where chunks are appended by the async writer.
+	responseBodyFile *os.File
+
+	// chunkChan is a channel for receiving response chunks to spool.
 	chunkChan chan []byte
 
 	// closeChan is a channel for signaling when the writer is closed.
@@ -1146,9 +1189,6 @@ type FileStreamingLogWriter struct {
 
 	// errorChan is a channel for reporting errors during writing.
 	errorChan chan error
-
-	// bufferedChunks stores the response chunks in order.
-	bufferedChunks *bytes.Buffer
 
 	// responseStatus stores the HTTP status code.
 	responseStatus int
@@ -1164,6 +1204,12 @@ type FileStreamingLogWriter struct {
 
 	// apiResponse stores the upstream API response data.
 	apiResponse []byte
+
+	// apiWebsocketTimeline stores the upstream websocket event timeline.
+	apiWebsocketTimeline []byte
+
+	// apiResponseTimestamp captures when the API response was received.
+	apiResponseTimestamp time.Time
 }
 
 // WriteChunkAsync writes a response chunk asynchronously (non-blocking).
@@ -1243,9 +1289,30 @@ func (w *FileStreamingLogWriter) WriteAPIResponse(apiResponse []byte) error {
 	return nil
 }
 
+// WriteAPIWebsocketTimeline buffers the upstream websocket timeline for later writing.
+//
+// Parameters:
+//   - apiWebsocketTimeline: The upstream websocket event timeline
+//
+// Returns:
+//   - error: Always returns nil (buffering cannot fail)
+func (w *FileStreamingLogWriter) WriteAPIWebsocketTimeline(apiWebsocketTimeline []byte) error {
+	if len(apiWebsocketTimeline) == 0 {
+		return nil
+	}
+	w.apiWebsocketTimeline = bytes.Clone(apiWebsocketTimeline)
+	return nil
+}
+
+func (w *FileStreamingLogWriter) SetFirstChunkTimestamp(timestamp time.Time) {
+	if !timestamp.IsZero() {
+		w.apiResponseTimestamp = timestamp
+	}
+}
+
 // Close finalizes the log file and cleans up resources.
 // It writes all buffered data to the file in the correct order:
-// API REQUEST -> API RESPONSE -> RESPONSE (status, headers, body chunks)
+// API WEBSOCKET TIMELINE -> API REQUEST -> API RESPONSE -> RESPONSE (status, headers, body chunks)
 //
 // Returns:
 //   - error: An error if closing fails, nil otherwise
@@ -1254,84 +1321,50 @@ func (w *FileStreamingLogWriter) Close() error {
 		close(w.chunkChan)
 	}
 
-	// Wait for async writer to finish buffering chunks
+	// Wait for async writer to finish spooling chunks
 	if w.closeChan != nil {
 		<-w.closeChan
 		w.chunkChan = nil
 	}
 
-	if w.file == nil {
+	select {
+	case errWrite := <-w.errorChan:
+		w.cleanupTempFiles()
+		return errWrite
+	default:
+	}
+
+	if w.logFilePath == "" {
+		w.cleanupTempFiles()
 		return nil
 	}
 
-	// Write all content in the correct order
-	var content strings.Builder
-
-	// 1. Write API REQUEST section
-	if len(w.apiRequest) > 0 {
-		if bytes.HasPrefix(w.apiRequest, []byte("=== API REQUEST")) {
-			content.Write(w.apiRequest)
-			if !bytes.HasSuffix(w.apiRequest, []byte("\n")) {
-				content.WriteString("\n")
-			}
-		} else {
-			content.WriteString("=== API REQUEST ===\n")
-			content.Write(w.apiRequest)
-			content.WriteString("\n")
-		}
-		content.WriteString("\n")
+	logFile, errOpen := os.OpenFile(w.logFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	if errOpen != nil {
+		w.cleanupTempFiles()
+		return fmt.Errorf("failed to create log file: %w", errOpen)
 	}
 
-	// 2. Write API RESPONSE section
-	if len(w.apiResponse) > 0 {
-		if bytes.HasPrefix(w.apiResponse, []byte("=== API RESPONSE")) {
-			content.Write(w.apiResponse)
-			if !bytes.HasSuffix(w.apiResponse, []byte("\n")) {
-				content.WriteString("\n")
-			}
-		} else {
-			content.WriteString("=== API RESPONSE ===\n")
-			content.Write(w.apiResponse)
-			content.WriteString("\n")
-		}
-		content.WriteString("\n")
-	}
-
-	// 3. Write RESPONSE section (status, headers, buffered chunks)
-	content.WriteString("=== RESPONSE ===\n")
-	if w.statusWritten {
-		content.WriteString(fmt.Sprintf("Status: %d\n", w.responseStatus))
-	}
-
-	for key, values := range w.responseHeaders {
-		for _, value := range values {
-			content.WriteString(fmt.Sprintf("%s: %s\n", key, value))
+	writeErr := w.writeFinalLog(logFile)
+	if errClose := logFile.Close(); errClose != nil {
+		log.WithError(errClose).Warn("failed to close request log file")
+		if writeErr == nil {
+			writeErr = errClose
 		}
 	}
-	content.WriteString("\n")
 
-	// Write buffered response body chunks
-	if w.bufferedChunks != nil && w.bufferedChunks.Len() > 0 {
-		content.Write(w.bufferedChunks.Bytes())
-	}
-
-	// Write the complete content to file
-	if _, err := w.file.WriteString(content.String()); err != nil {
-		_ = w.file.Close()
-		return err
-	}
-
-	return w.file.Close()
+	w.cleanupTempFiles()
+	return writeErr
 }
 
 // asyncWriter runs in a goroutine to buffer chunks from the channel.
-// It continuously reads chunks from the channel and buffers them for later writing.
+// It continuously reads chunks from the channel and appends them to a temp file for later assembly.
 func (w *FileStreamingLogWriter) asyncWriter() {
 	defer close(w.closeChan)
 
 	for chunk := range w.chunkChan {
-		if w.bufferedChunks != nil {
-			w.bufferedChunks.Write(chunk)
+		if w.responseBodyFile == nil {
+			continue
 		}
 		if _, errWrite := w.responseBodyFile.Write(chunk); errWrite != nil {
 			select {
@@ -1446,6 +1479,19 @@ func (w *NoOpStreamingLogWriter) WriteAPIRequest(_ []byte) error {
 func (w *NoOpStreamingLogWriter) WriteAPIResponse(_ []byte) error {
 	return nil
 }
+
+// WriteAPIWebsocketTimeline is a no-op implementation that does nothing and always returns nil.
+//
+// Parameters:
+//   - apiWebsocketTimeline: The upstream websocket event timeline (ignored)
+//
+// Returns:
+//   - error: Always returns nil
+func (w *NoOpStreamingLogWriter) WriteAPIWebsocketTimeline(_ []byte) error {
+	return nil
+}
+
+func (w *NoOpStreamingLogWriter) SetFirstChunkTimestamp(_ time.Time) {}
 
 // Close is a no-op implementation that does nothing and always returns nil.
 //
