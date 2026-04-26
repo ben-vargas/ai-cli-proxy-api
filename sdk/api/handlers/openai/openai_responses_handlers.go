@@ -364,7 +364,7 @@ func (h *OpenAIResponsesAPIHandler) handleNonStreamingResponseViaChat(c *gin.Con
 	handlers.WriteUpstreamHeaders(c.Writer.Header(), upstreamHeaders)
 	var param any
 	converted := responsesconverter.ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(cliCtx, modelName, originalResponsesJSON, originalResponsesJSON, resp, &param)
-	if converted == "" {
+	if len(converted) == 0 {
 		h.WriteErrorResponse(c, &interfaces.ErrorMessage{
 			StatusCode: http.StatusInternalServerError,
 			Error:      fmt.Errorf("failed to convert chat completion response to responses format"),
@@ -372,7 +372,7 @@ func (h *OpenAIResponsesAPIHandler) handleNonStreamingResponseViaChat(c *gin.Con
 		cliCancel(fmt.Errorf("response conversion failed"))
 		return
 	}
-	_, _ = c.Writer.Write([]byte(converted))
+	_, _ = c.Writer.Write(converted)
 	cliCancel()
 }
 
@@ -520,13 +520,13 @@ func (h *OpenAIResponsesAPIHandler) handleStreamingResponseViaChat(c *gin.Contex
 func writeChatAsResponsesChunk(c *gin.Context, ctx context.Context, modelName string, originalResponsesJSON, chunk []byte, param *any) {
 	outputs := responsesconverter.ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx, modelName, originalResponsesJSON, originalResponsesJSON, chunk, param)
 	for _, out := range outputs {
-		if out == "" {
+		if len(out) == 0 {
 			continue
 		}
-		if bytes.HasPrefix([]byte(out), []byte("event:")) {
+		if bytes.HasPrefix(out, []byte("event:")) {
 			_, _ = c.Writer.Write([]byte("\n"))
 		}
-		_, _ = c.Writer.Write([]byte(out))
+		_, _ = c.Writer.Write(out)
 		_, _ = c.Writer.Write([]byte("\n"))
 	}
 }
@@ -536,13 +536,13 @@ func (h *OpenAIResponsesAPIHandler) forwardChatAsResponsesStream(c *gin.Context,
 		WriteChunk: func(chunk []byte) {
 			outputs := responsesconverter.ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx, modelName, originalResponsesJSON, originalResponsesJSON, chunk, param)
 			for _, out := range outputs {
-				if out == "" {
+				if len(out) == 0 {
 					continue
 				}
-				if bytes.HasPrefix([]byte(out), []byte("event:")) {
+				if bytes.HasPrefix(out, []byte("event:")) {
 					_, _ = c.Writer.Write([]byte("\n"))
 				}
-				_, _ = c.Writer.Write([]byte(out))
+				_, _ = c.Writer.Write(out)
 				_, _ = c.Writer.Write([]byte("\n"))
 			}
 		},
@@ -567,7 +567,10 @@ func (h *OpenAIResponsesAPIHandler) forwardChatAsResponsesStream(c *gin.Context,
 	})
 }
 
-func (h *OpenAIResponsesAPIHandler) forwardResponsesStream(c *gin.Context, flusher http.Flusher, cancel func(error), data <-chan []byte, errs <-chan *interfaces.ErrorMessage) {
+func (h *OpenAIResponsesAPIHandler) forwardResponsesStream(c *gin.Context, flusher http.Flusher, cancel func(error), data <-chan []byte, errs <-chan *interfaces.ErrorMessage, framer *responsesSSEFramer) {
+	if framer == nil {
+		framer = &responsesSSEFramer{}
+	}
 	h.ForwardStream(c, flusher, cancel, data, errs, handlers.StreamForwardOptions{
 		WriteChunk: func(chunk []byte) {
 			framer.WriteChunk(c.Writer, chunk)

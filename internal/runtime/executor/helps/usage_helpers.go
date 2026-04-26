@@ -355,7 +355,7 @@ func parseOpenAIResponsesStreamUsage(line []byte) (usage.Detail, bool) {
 	return parseOpenAIResponsesUsageDetail(usageNode), true
 }
 
-func parseClaudeUsage(data []byte) usage.Detail {
+func ParseClaudeUsage(data []byte) usage.Detail {
 	usageNode := gjson.ParseBytes(data).Get("usage")
 	if !usageNode.Exists() {
 		return usage.Detail{}

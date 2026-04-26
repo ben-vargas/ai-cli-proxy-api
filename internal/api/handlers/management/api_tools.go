@@ -13,12 +13,13 @@ import (
 
 	"github.com/fxamacker/cbor/v2"
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/geminicli"
+	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
+	"github.com/router-for-me/CLIProxyAPI/v6/sdk/proxyutil"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
-
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/geminicli"
-	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 )
 
 const defaultAPICallTimeout = 60 * time.Second
@@ -769,6 +770,88 @@ func resolveAPIKeyConfig[T apiKeyConfigEntry](entries []T, auth *coreauth.Auth) 
 		}
 	}
 	return nil
+}
+
+func proxyURLFromAPIKeyConfig(cfg *config.Config, auth *coreauth.Auth) string {
+	if cfg == nil || auth == nil {
+		return ""
+	}
+	authKind, authAccount := auth.AccountInfo()
+	if !strings.EqualFold(strings.TrimSpace(authKind), "api_key") {
+		return ""
+	}
+
+	attrs := auth.Attributes
+	compatName := ""
+	providerKey := ""
+	if len(attrs) > 0 {
+		compatName = strings.TrimSpace(attrs["compat_name"])
+		providerKey = strings.TrimSpace(attrs["provider_key"])
+	}
+	if compatName != "" || strings.EqualFold(strings.TrimSpace(auth.Provider), "openai-compatibility") {
+		return resolveOpenAICompatAPIKeyProxyURL(cfg, auth, strings.TrimSpace(authAccount), providerKey, compatName)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(auth.Provider)) {
+	case "gemini":
+		if entry := resolveAPIKeyConfig(cfg.GeminiKey, auth); entry != nil {
+			return strings.TrimSpace(entry.ProxyURL)
+		}
+	case "claude":
+		if entry := resolveAPIKeyConfig(cfg.ClaudeKey, auth); entry != nil {
+			return strings.TrimSpace(entry.ProxyURL)
+		}
+	case "codex":
+		if entry := resolveAPIKeyConfig(cfg.CodexKey, auth); entry != nil {
+			return strings.TrimSpace(entry.ProxyURL)
+		}
+	}
+	return ""
+}
+
+func resolveOpenAICompatAPIKeyProxyURL(cfg *config.Config, auth *coreauth.Auth, apiKey, providerKey, compatName string) string {
+	if cfg == nil || auth == nil {
+		return ""
+	}
+	apiKey = strings.TrimSpace(apiKey)
+	if apiKey == "" {
+		return ""
+	}
+	candidates := make([]string, 0, 3)
+	if v := strings.TrimSpace(compatName); v != "" {
+		candidates = append(candidates, v)
+	}
+	if v := strings.TrimSpace(providerKey); v != "" {
+		candidates = append(candidates, v)
+	}
+	if v := strings.TrimSpace(auth.Provider); v != "" {
+		candidates = append(candidates, v)
+	}
+
+	for i := range cfg.OpenAICompatibility {
+		compat := &cfg.OpenAICompatibility[i]
+		for _, candidate := range candidates {
+			if candidate != "" && strings.EqualFold(strings.TrimSpace(candidate), compat.Name) {
+				for j := range compat.APIKeyEntries {
+					entry := &compat.APIKeyEntries[j]
+					if strings.EqualFold(strings.TrimSpace(entry.APIKey), apiKey) {
+						return strings.TrimSpace(entry.ProxyURL)
+					}
+				}
+				return ""
+			}
+		}
+	}
+	return ""
+}
+
+func buildProxyTransport(proxyStr string) *http.Transport {
+	transport, _, errBuild := proxyutil.BuildHTTPTransport(proxyStr)
+	if errBuild != nil {
+		log.WithError(errBuild).Debug("build proxy transport failed")
+		return nil
+	}
+	return transport
 }
 
 // headerContainsValue checks whether a header map contains a target value (case-insensitive key and value).
