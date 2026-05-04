@@ -300,6 +300,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 	// or when a local management password is provided (e.g. TUI mode).
 	hasManagementSecret := cfg.RemoteManagement.SecretKey != "" || envManagementSecret || s.localPassword != ""
 	s.managementRoutesEnabled.Store(hasManagementSecret)
+	redisqueue.SetEnabled(hasManagementSecret)
 	if hasManagementSecret {
 		s.registerManagementRoutes()
 	}
@@ -996,27 +997,34 @@ func (s *Server) UpdateClients(cfg *config.Config) {
 	if s.envManagementSecret {
 		s.registerManagementRoutes()
 		if s.managementRoutesEnabled.CompareAndSwap(false, true) {
+			redisqueue.SetEnabled(true)
 			log.Info("management routes enabled via MANAGEMENT_PASSWORD")
 		} else {
 			s.managementRoutesEnabled.Store(true)
+			redisqueue.SetEnabled(true)
 		}
 	} else {
 		switch {
 		case prevSecretEmpty && !newSecretEmpty:
 			s.registerManagementRoutes()
 			if s.managementRoutesEnabled.CompareAndSwap(false, true) {
+				redisqueue.SetEnabled(true)
 				log.Info("management routes enabled after secret key update")
 			} else {
 				s.managementRoutesEnabled.Store(true)
+				redisqueue.SetEnabled(true)
 			}
 		case !prevSecretEmpty && newSecretEmpty:
 			if s.managementRoutesEnabled.CompareAndSwap(true, false) {
+				redisqueue.SetEnabled(false)
 				log.Info("management routes disabled after secret key removal")
 			} else {
 				s.managementRoutesEnabled.Store(false)
+				redisqueue.SetEnabled(false)
 			}
 		default:
 			s.managementRoutesEnabled.Store(!newSecretEmpty)
+			redisqueue.SetEnabled(!newSecretEmpty)
 		}
 	}
 
